@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Leitor QR Code</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; background: transparent; }
+    .wrap { width: 100%; padding: 4px 0 8px; }
+    #reader { width: 100%; min-height: 300px; border-radius: 12px; overflow: hidden; background: #111; }
+    #reader video { object-fit: cover !important; }
+    .status { text-align: center; font-size: 14px; margin: 8px 0; line-height: 1.35; }
+    .error { color: #b42318; }
+    .ok { color: #067647; font-weight: 700; }
+    .close { width: 100%; border: 1px solid #999; border-radius: 8px; padding: 10px 12px; font-size: 15px; cursor: pointer; background: transparent; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="reader"></div>
+    <div id="status" class="status">Abrindo a câmera traseira…</div>
+    <button id="close" class="close" type="button">Fechar câmera</button>
+  </div>
+
+<script>
+  let scanner = null;
+  let finished = false;
+  const statusEl = document.getElementById('status');
+
+  function post(type, extra = {}) {
+    window.parent.postMessage({ isStreamlitMessage: true, type, ...extra }, '*');
+  }
+  function ready() {
+    post('streamlit:componentReady', { apiVersion: 1 });
+    setHeight();
+  }
+  function setHeight() {
+    post('streamlit:setFrameHeight', { height: Math.max(document.documentElement.scrollHeight, 390) });
+  }
+  function setValue(value) {
+    post('streamlit:componentValue', { value, dataType: 'json' });
+  }
+  async function stopScanner() {
+    if (scanner) {
+      try { await scanner.stop(); } catch (_) {}
+      try { await scanner.clear(); } catch (_) {}
+    }
+  }
+  async function finish(value) {
+    if (finished) return;
+    finished = true;
+    await stopScanner();
+    setValue(value);
+  }
+  function qrbox(viewfinderWidth, viewfinderHeight) {
+    const edge = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.72);
+    return { width: edge, height: edge };
+  }
+  async function startScanner() {
+    if (typeof Html5Qrcode === 'undefined') {
+      statusEl.className = 'status error';
+      statusEl.textContent = 'Não foi possível carregar o leitor. Verifique a internet e recarregue a página.';
+      setHeight();
+      return;
+    }
+
+    scanner = new Html5Qrcode('reader', {
+      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+      verbose: false
+    });
+
+    const config = {
+      fps: 12,
+      qrbox,
+      aspectRatio: 1.0,
+      disableFlip: false,
+      videoConstraints: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    };
+
+    const onSuccess = async (decodedText) => {
+      const digits = String(decodedText || '').replace(/\D/g, '');
+      if (digits.length !== 9) {
+        statusEl.className = 'status error';
+        statusEl.textContent = `QR Code inválido: encontrado(s) ${digits.length} dígito(s). O número da amostra deve ter 9.`;
+        return;
+      }
+      statusEl.className = 'status ok';
+      statusEl.textContent = `QR Code lido: ${digits}`;
+      await finish(digits);
+    };
+
+    const onFailure = () => {};
+
+    try {
+      // Primeiro tenta forçar a câmera traseira.
+      await scanner.start({ facingMode: { exact: 'environment' } }, config, onSuccess, onFailure);
+    } catch (rearError) {
+      try {
+        // Fallback: prefere a traseira, mas aceita a câmera disponível.
+        await scanner.start({ facingMode: 'environment' }, config, onSuccess, onFailure);
+      } catch (fallbackError) {
+        try {
+          const cameras = await Html5Qrcode.getCameras();
+          if (!cameras || cameras.length === 0) throw fallbackError;
+          const rear = cameras.find(c => /back|rear|environment|traseira/i.test(c.label)) || cameras[cameras.length - 1];
+          await scanner.start(rear.id, config, onSuccess, onFailure);
+        } catch (finalError) {
+          statusEl.className = 'status error';
+          statusEl.textContent = 'Não foi possível abrir a câmera. Autorize o acesso à câmera nas permissões do navegador.';
+          setHeight();
+          return;
+        }
+      }
+    }
+
+    statusEl.className = 'status';
+    statusEl.textContent = 'Aponte para o QR Code. A leitura será automática, sem tirar foto.';
+    setTimeout(setHeight, 500);
+  }
+
+  document.getElementById('close').addEventListener('click', () => finish('__CLOSE__'));
+  window.addEventListener('beforeunload', stopScanner);
+  window.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'streamlit:render') setHeight();
+  });
+
+  ready();
+  startScanner();
+</script>
+</body>
+</html>

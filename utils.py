@@ -1220,47 +1220,54 @@ def _decode_qr_sample_image(uploaded_image: Any) -> Tuple[Optional[str], Optiona
 
 
 def _render_sample_qr_scanner() -> None:
-    """Exibe a câmera e preenche automaticamente o número da amostra pelo QR Code."""
+    """Abre um scanner contínuo, priorizando a câmera traseira, e lê o QR automaticamente."""
     st.session_state.setdefault("sample_qr_scanner_open", False)
 
     if st.button(
         "▣ Ler QR Code",
         key="sample_qr_toggle",
-        help="Abra a câmera e leia o QR Code da amostra.",
+        help="Abra a câmera traseira e aponte para o QR Code. Não é necessário tirar foto.",
         use_container_width=True,
     ):
         st.session_state["sample_qr_scanner_open"] = not st.session_state["sample_qr_scanner_open"]
-        st.session_state.pop("sample_qr_image", None)
-        st.session_state.pop("sample_qr_error", None)
+        st.session_state.pop("sample_qr_component_result", None)
         st.rerun()
 
     if not st.session_state["sample_qr_scanner_open"]:
         return
 
-    captured = st.camera_input(
-        "Aponte a câmera para o QR Code",
-        key="sample_qr_image",
-        help="No celular, autorize o uso da câmera e mantenha o QR Code bem iluminado.",
+    component_path = os.path.join(os.path.dirname(__file__), "qr_scanner_component")
+    qr_scanner = components.declare_component(
+        "sample_qr_live_scanner",
+        path=component_path,
+    )
+    result = qr_scanner(
+        key="sample_qr_live_scanner_instance",
+        default=None,
     )
 
-    if captured is None:
-        st.caption("Centralize o QR Code, tire a foto e aguarde a leitura automática.")
+    if not result:
         return
 
-    sample_number, error = _decode_qr_sample_image(captured)
-    if error:
-        st.error(error)
+    result = str(result).strip()
+    if result == "__CLOSE__":
+        st.session_state["sample_qr_scanner_open"] = False
+        st.rerun()
+
+    digits = re.sub(r"\D", "", result)
+    if len(digits) != 9:
+        st.error("QR Code inválido. O n.º da Amostra deve conter exatamente 9 números.")
         return
 
-    if st.session_state.get("sample_qr_last_image_id") == captured.file_id:
+    if st.session_state.get("sample_qr_component_result") == digits:
         return
 
-    st.session_state["sample_qr_last_image_id"] = captured.file_id
+    st.session_state["sample_qr_component_result"] = digits
     st.session_state["sample_qr_scanner_open"] = False
     st.session_state["_sample_qr_apply_lookup"] = True
-    _queue_form_updates({"n.º da Amostra": sample_number})
+    _queue_form_updates({"n.º da Amostra": digits})
     st.session_state["sample_lookup_status"] = "loaded"
-    st.session_state["sample_lookup_message"] = f"QR Code lido com sucesso: {sample_number}."
+    st.session_state["sample_lookup_message"] = f"QR Code lido com sucesso: {digits}."
     st.rerun()
 
 
