@@ -1,0 +1,17 @@
+# Ambiente virtual
+venv/
+.venv/
+
+# Cache do Python
+__pycache__/
+*.pyc
+
+# Credenciais
+token.json
+credentials.json
+
+# VS Code
+.vscode/
+
+# Arquivos temporários
+*.log.streamlit/secrets.toml
