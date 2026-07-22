@@ -8,6 +8,9 @@ import io
 import os
 import re
 import json
+
+import cv2
+import numpy as np
 from math import ceil
 from datetime import datetime, date
 from typing import Dict, List, Tuple, Any, Optional
@@ -160,42 +163,82 @@ SHEET_HEADER_TO_FORM: Dict[str, str] = {
 
 # ░░░ Autenticação Google ░░░
 def _authorize_google_sheets() -> Credentials:
-    # Preferencialmente usa token.json quando executado localmente
+    """Autoriza o Google Sheets no computador local e no Streamlit Cloud.
+
+    Ordem de leitura:
+    1. token.json local;
+    2. GOOGLE_TOKEN nos Secrets do Streamlit;
+    3. GOOGLE_TOKEN em variável de ambiente;
+    4. fluxo OAuth local por GOOGLE_CLIENT_SECRET (compatibilidade).
+    """
     token_path = "token.json"
     creds = None
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            # Busca client secret do Streamlit Secrets ou variável de ambiente
-            client_secret_json = None
-            if st:
-                client_secret_json = st.secrets.get("GOOGLE_CLIENT_SECRET")
-            if not client_secret_json:
-                client_secret_json = os.getenv("GOOGLE_CLIENT_SECRET")
-            if not client_secret_json:
-                raise RuntimeError("Credenciais Google ausentes. Defina GOOGLE_CLIENT_SECRET nos secrets/ambiente.")
-            # Usa InstalledAppFlow apenas se você rodar localmente e quiser abrir consent
-            from google_auth_oauthlib.flow import InstalledAppFlow
-            try:
-                client_config = json.loads(client_secret_json)
-            except Exception as exc:
-                raise RuntimeError("GOOGLE_CLIENT_SECRET inválido (JSON).") from exc
-            flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-            # Nota: em ambientes sem navegador, use run_console()
-            if st:
-                creds = flow.run_console()
-            else:
-                creds = flow.run_console()
-        # Persiste token.json quando possível
+    # 1) Execução local: utiliza o token salvo no projeto.
+    if os.path.exists(token_path):
         try:
-            with open(token_path, "w", encoding="utf-8") as fp:
-                fp.write(creds.to_json())
+            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
         except Exception:
-            pass
+            creds = None
+
+    # 2) Streamlit Cloud: utiliza o JSON completo do token armazenado nos Secrets.
+    if creds is None:
+        token_json = None
+        if st is not None:
+            try:
+                token_json = st.secrets.get("GOOGLE_TOKEN")
+            except Exception:
+                token_json = None
+        if not token_json:
+            token_json = os.getenv("GOOGLE_TOKEN")
+
+        if token_json:
+            try:
+                token_info = json.loads(str(token_json))
+                creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+            except Exception as exc:
+                raise RuntimeError("GOOGLE_TOKEN inválido nos Secrets do Streamlit.") from exc
+
+    # Atualiza automaticamente o access token usando o refresh token.
+    if creds and not creds.valid and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+        except Exception as exc:
+            raise RuntimeError("Não foi possível renovar as credenciais Google.") from exc
+
+    # 3) Compatibilidade para primeira autorização local.
+    if not creds or not creds.valid:
+        client_secret_json = None
+        if st is not None:
+            try:
+                client_secret_json = st.secrets.get("GOOGLE_CLIENT_SECRET")
+            except Exception:
+                client_secret_json = None
+        if not client_secret_json:
+            client_secret_json = os.getenv("GOOGLE_CLIENT_SECRET")
+
+        if not client_secret_json:
+            raise RuntimeError(
+                "Credenciais Google ausentes. Defina GOOGLE_TOKEN nos Secrets do Streamlit."
+            )
+
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        try:
+            client_config = json.loads(str(client_secret_json))
+        except Exception as exc:
+            raise RuntimeError("GOOGLE_CLIENT_SECRET inválido (JSON).") from exc
+
+        # Este fluxo é destinado ao uso local, onde o navegador pode ser aberto.
+        flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+        creds = flow.run_local_server(port=0)
+
+    # Persiste o token atualizado quando houver permissão de escrita local.
+    try:
+        with open(token_path, "w", encoding="utf-8") as fp:
+            fp.write(creds.to_json())
+    except Exception:
+        pass
+
     return creds
 
 def _get_sheets_service():
@@ -1146,12 +1189,91 @@ def _two_checkboxes(label: str, default: bool | None = None) -> bool:
     return bool(st.session_state[key_yes])
 
 
+
+def _decode_qr_sample_image(uploaded_image: Any) -> Tuple[Optional[str], Optional[str]]:
+    """Lê o QR Code de uma foto e retorna o n.º da amostra com 9 dígitos."""
+    if uploaded_image is None:
+        return None, None
+
+    try:
+        image_bytes = uploaded_image.getvalue()
+        image_array = np.frombuffer(image_bytes, dtype=np.uint8)
+        image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        if image is None:
+            return None, "Não foi possível abrir a imagem capturada."
+
+        detector = cv2.QRCodeDetector()
+        decoded_text, _, _ = detector.detectAndDecode(image)
+        decoded_text = str(decoded_text or "").strip()
+        if not decoded_text:
+            return None, "QR Code não identificado. Aproxime a câmera e tente novamente."
+
+        digits = re.sub(r"\D", "", decoded_text)
+        if len(digits) != 9:
+            return None, (
+                "QR Code inválido para o n.º da Amostra. "
+                f"Foram encontrados {len(digits)} dígitos; são necessários exatamente 9."
+            )
+        return digits, None
+    except Exception as exc:
+        return None, f"Erro ao ler o QR Code: {exc}"
+
+
+def _render_sample_qr_scanner() -> None:
+    """Exibe a câmera e preenche automaticamente o número da amostra pelo QR Code."""
+    st.session_state.setdefault("sample_qr_scanner_open", False)
+
+    if st.button(
+        "▣ Ler QR Code",
+        key="sample_qr_toggle",
+        help="Abra a câmera e leia o QR Code da amostra.",
+        use_container_width=True,
+    ):
+        st.session_state["sample_qr_scanner_open"] = not st.session_state["sample_qr_scanner_open"]
+        st.session_state.pop("sample_qr_image", None)
+        st.session_state.pop("sample_qr_error", None)
+        st.rerun()
+
+    if not st.session_state["sample_qr_scanner_open"]:
+        return
+
+    captured = st.camera_input(
+        "Aponte a câmera para o QR Code",
+        key="sample_qr_image",
+        help="No celular, autorize o uso da câmera e mantenha o QR Code bem iluminado.",
+    )
+
+    if captured is None:
+        st.caption("Centralize o QR Code, tire a foto e aguarde a leitura automática.")
+        return
+
+    sample_number, error = _decode_qr_sample_image(captured)
+    if error:
+        st.error(error)
+        return
+
+    if st.session_state.get("sample_qr_last_image_id") == captured.file_id:
+        return
+
+    st.session_state["sample_qr_last_image_id"] = captured.file_id
+    st.session_state["sample_qr_scanner_open"] = False
+    st.session_state["_sample_qr_apply_lookup"] = True
+    _queue_form_updates({"n.º da Amostra": sample_number})
+    st.session_state["sample_lookup_status"] = "loaded"
+    st.session_state["sample_lookup_message"] = f"QR Code lido com sucesso: {sample_number}."
+    st.rerun()
+
+
 def build_form_and_get_responses() -> Dict[str, Any]:
     """Desenha o formulário completo e retorna um dicionário label->valor."""
     if st is None:
         raise RuntimeError("Streamlit não instalado – UI indisponível.")
 
     _ensure_form_state()
+    if st.session_state.pop("_sample_qr_apply_lookup", False):
+        _handle_sample_change()
+        st.rerun()
+
     form_values = st.session_state["form_values"]
 
     st.header("Formulário de Coleta de Amostras de Óleo 🛢️")
@@ -1180,6 +1302,7 @@ def build_form_and_get_responses() -> Dict[str, Any]:
                 _block_non_numeric_sample_keystrokes()
                 sample_value = re.sub(r"\D", "", str(sample_value))[:9]
                 sample_value = st.session_state.get(sample_label, sample_value)
+                _render_sample_qr_scanner()
             responses[sample_label] = sample_value
             form_values[sample_label] = sample_value
 
