@@ -1223,8 +1223,13 @@ def _render_sample_qr_scanner() -> None:
     """Abre um scanner contínuo, priorizando a câmera traseira, e lê o QR automaticamente."""
     st.session_state.setdefault("sample_qr_scanner_open", False)
 
+    button_label = (
+        "🔄 Ler outro QR Code"
+        if st.session_state.get("sample_qr_verified", False)
+        else "▣ Ler QR Code"
+    )
     if st.button(
-        "▣ Ler QR Code",
+        button_label,
         key="sample_qr_toggle",
         help="Abra a câmera traseira e aponte para o QR Code. Não é necessário tirar foto.",
         use_container_width=True,
@@ -1263,6 +1268,7 @@ def _render_sample_qr_scanner() -> None:
         return
 
     st.session_state["sample_qr_component_result"] = digits
+    st.session_state["sample_qr_verified"] = True
     st.session_state["sample_qr_scanner_open"] = False
     st.session_state["_sample_qr_apply_lookup"] = True
     _queue_form_updates({"n.º da Amostra": digits})
@@ -1284,6 +1290,40 @@ def build_form_and_get_responses() -> Dict[str, Any]:
     form_values = st.session_state["form_values"]
 
     st.header("Formulário de Coleta de Amostras de Óleo 🛢️")
+
+    # O formulário só é liberado após uma leitura válida feita pelo scanner.
+    # Não basta existir um número no estado: a sessão precisa registrar que ele
+    # veio do componente de QR Code.
+    qr_verified = bool(st.session_state.get("sample_qr_verified", False))
+    qr_number = re.sub(
+        r"\D", "", str(st.session_state.get("sample_qr_component_result", ""))
+    )[:9]
+    current_sample = re.sub(
+        r"\D", "", str(st.session_state.get("n.º da Amostra", ""))
+    )[:9]
+    qr_verified = (
+        qr_verified
+        and len(qr_number) == 9
+        and current_sample == qr_number
+    )
+
+    if not qr_verified:
+        st.info(
+            "🔒 Para iniciar o preenchimento, leia primeiro o QR Code da amostra."
+        )
+        st.text_input(
+            "n.º da Amostra",
+            value="",
+            placeholder="Aguardando leitura do QR Code",
+            disabled=True,
+            key="sample_qr_locked_display",
+        )
+        _render_sample_qr_scanner()
+        st.caption(
+            "Os demais campos serão liberados automaticamente após a leitura válida."
+        )
+        st.stop()
+
     responses: Dict[str, Any] = {}
 
     for section, questions in FORM_SECTIONS:
@@ -1303,10 +1343,9 @@ def build_form_and_get_responses() -> Dict[str, Any]:
                     sample_label,
                     key=sample_label,
                     max_chars=9,
-                    on_change=_handle_sample_change,
-                    help="Obrigatório: informe exatamente 9 números.",
+                    disabled=True,
+                    help="Número validado pela leitura obrigatória do QR Code.",
                 )
-                _block_non_numeric_sample_keystrokes()
                 sample_value = re.sub(r"\D", "", str(sample_value))[:9]
                 sample_value = st.session_state.get(sample_label, sample_value)
                 _render_sample_qr_scanner()
