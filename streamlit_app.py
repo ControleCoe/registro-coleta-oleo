@@ -10,6 +10,7 @@ from utils import (
     save_to_sheets,
     generate_pdf,
     sync_sample_number,
+    require_qr_before_form,
 )
 
 st.set_page_config(
@@ -22,6 +23,8 @@ st.title("Oliveira Energia — Registro de coleta de amostra de óleo")
 if "pdf_bytes" not in st.session_state:
     st.session_state["pdf_bytes"] = None
 
+# Barreira principal: o formulário nem é criado antes da leitura do QR Code.
+require_qr_before_form()
 responses: Dict[str, object] = build_form_and_get_responses()
 
 if st.button("✅ Enviar & Gerar PDF"):

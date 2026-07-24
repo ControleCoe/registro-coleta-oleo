@@ -1277,6 +1277,45 @@ def _render_sample_qr_scanner() -> None:
     st.rerun()
 
 
+def _is_sample_qr_verified() -> bool:
+    """Confirma que a amostra atual veio de uma leitura válida do QR Code."""
+    qr_number = re.sub(
+        r"\D", "", str(st.session_state.get("sample_qr_component_result", ""))
+    )[:9]
+    current_sample = re.sub(
+        r"\D", "", str(st.session_state.get("n.º da Amostra", ""))
+    )[:9]
+    return bool(
+        st.session_state.get("sample_qr_verified", False)
+        and len(qr_number) == 9
+        and current_sample == qr_number
+    )
+
+
+def require_qr_before_form() -> None:
+    """Não permite criar o formulário antes de uma leitura válida do QR Code."""
+    if st is None:
+        raise RuntimeError("Streamlit não instalado – UI indisponível.")
+
+    _ensure_form_state()
+    if st.session_state.pop("_sample_qr_apply_lookup", False):
+        _handle_sample_change()
+        st.rerun()
+
+    if _is_sample_qr_verified():
+        return
+
+    st.markdown("## 📦 Nova Coleta de Óleo")
+    st.info(
+        "Para iniciar a coleta, escaneie primeiro o QR Code da etiqueta da amostra."
+    )
+    _render_sample_qr_scanner()
+    st.caption(
+        "O formulário completo será exibido automaticamente após uma leitura válida."
+    )
+    st.stop()
+
+
 def build_form_and_get_responses() -> Dict[str, Any]:
     """Desenha o formulário completo e retorna um dicionário label->valor."""
     if st is None:
@@ -1291,23 +1330,9 @@ def build_form_and_get_responses() -> Dict[str, Any]:
 
     st.header("Formulário de Coleta de Amostras de Óleo 🛢️")
 
-    # O formulário só é liberado após uma leitura válida feita pelo scanner.
-    # Não basta existir um número no estado: a sessão precisa registrar que ele
-    # veio do componente de QR Code.
-    qr_verified = bool(st.session_state.get("sample_qr_verified", False))
-    qr_number = re.sub(
-        r"\D", "", str(st.session_state.get("sample_qr_component_result", ""))
-    )[:9]
-    current_sample = re.sub(
-        r"\D", "", str(st.session_state.get("n.º da Amostra", ""))
-    )[:9]
-    qr_verified = (
-        qr_verified
-        and len(qr_number) == 9
-        and current_sample == qr_number
-    )
-
-    if not qr_verified:
+    # Proteção redundante: mesmo que esta função seja chamada diretamente,
+    # nenhum campo é criado antes de uma leitura válida do QR Code.
+    if not _is_sample_qr_verified():
         st.info(
             "🔒 Para iniciar o preenchimento, leia primeiro o QR Code da amostra."
         )
