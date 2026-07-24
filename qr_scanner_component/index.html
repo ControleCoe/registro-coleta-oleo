@@ -41,7 +41,7 @@
     post('streamlit:setFrameHeight', { height: Math.max(document.documentElement.scrollHeight, 390) });
   }
   function setValue(value) {
-    post('streamlit:componentValue', { value, dataType: 'json' });
+    post('streamlit:setComponentValue', { value });
   }
   async function stopScanner() {
     if (scanner) {
