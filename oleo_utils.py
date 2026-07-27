@@ -1292,8 +1292,39 @@ def _is_sample_qr_verified() -> bool:
     )
 
 
+def _sanitize_manual_sample_input() -> None:
+    """Mantém somente números no campo manual da etiqueta, limitado a 9 dígitos."""
+    if st is None:
+        return
+    raw_value = str(st.session_state.get("sample_manual_entry", "") or "")
+    st.session_state["sample_manual_entry"] = re.sub(r"\D", "", raw_value)[:9]
+
+
+def _accept_manual_sample_number() -> None:
+    """Valida a etiqueta digitada e libera o mesmo fluxo usado pelo QR Code."""
+    _sanitize_manual_sample_input()
+    digits = str(st.session_state.get("sample_manual_entry", "") or "")
+
+    if len(digits) != 9:
+        st.session_state["sample_manual_error"] = (
+            "Informe exatamente 9 números no campo Número da etiqueta."
+        )
+        return
+
+    st.session_state.pop("sample_manual_error", None)
+    st.session_state["sample_qr_component_result"] = digits
+    st.session_state["sample_qr_verified"] = True
+    st.session_state["sample_qr_scanner_open"] = False
+    st.session_state["_sample_qr_apply_lookup"] = True
+    _queue_form_updates({"n.º da Amostra": digits})
+    st.session_state["sample_lookup_status"] = "loaded"
+    st.session_state["sample_lookup_message"] = (
+        f"Etiqueta informada manualmente: {digits}."
+    )
+
+
 def require_qr_before_form() -> None:
-    """Não permite criar o formulário antes de uma leitura válida do QR Code."""
+    """Libera o formulário após QR Code válido ou etiqueta digitada manualmente."""
     if st is None:
         raise RuntimeError("Streamlit não instalado – UI indisponível.")
 
@@ -1307,11 +1338,37 @@ def require_qr_before_form() -> None:
 
     st.markdown("## 📦 Nova Coleta de Óleo")
     st.info(
-        "Para iniciar a coleta, escaneie primeiro o QR Code da etiqueta da amostra."
+        "Para iniciar a coleta, leia o QR Code ou digite o número da etiqueta da amostra."
+    )
+
+    st.text_input(
+        "Número da etiqueta",
+        key="sample_manual_entry",
+        max_chars=9,
+        placeholder="Digite os 9 números da etiqueta",
+        on_change=_sanitize_manual_sample_input,
+        help="Aceita somente números e deve conter exatamente 9 dígitos.",
+    )
+
+    if st.button(
+        "➡️ Continuar com a etiqueta",
+        key="sample_manual_continue",
+        use_container_width=True,
+        on_click=_accept_manual_sample_number,
+    ):
+        pass
+
+    manual_error = st.session_state.get("sample_manual_error")
+    if manual_error:
+        st.error(manual_error)
+
+    st.markdown(
+        "<div style='text-align:center; margin:0.65rem 0; opacity:0.65;'>ou</div>",
+        unsafe_allow_html=True,
     )
     _render_sample_qr_scanner()
     st.caption(
-        "O formulário completo será exibido automaticamente após uma leitura válida."
+        "O formulário completo será exibido após uma etiqueta válida ou uma leitura do QR Code."
     )
     st.stop()
 
