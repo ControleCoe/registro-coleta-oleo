@@ -1,7 +1,7 @@
 from pathlib import Path
 import runpy
 import streamlit as st
-from loader_utils import pacman_loader
+from loader_utils import _loader_html
 
 st.set_page_config(
     page_title="Controle de Amostras de Óleo",
@@ -15,11 +15,25 @@ BASE_DIR = Path(__file__).resolve().parent
 if "modulo_atual" not in st.session_state:
     st.session_state["modulo_atual"] = "inicio"
 
+if "mostrar_loader_navegacao" not in st.session_state:
+    st.session_state["mostrar_loader_navegacao"] = False
+
+if "mensagem_loader_navegacao" not in st.session_state:
+    st.session_state["mensagem_loader_navegacao"] = "Carregando..."
+
 def abrir_modulo(nome):
     st.session_state["modulo_atual"] = nome
+    st.session_state["mostrar_loader_navegacao"] = True
+    st.session_state["mensagem_loader_navegacao"] = (
+        "Carregando Registro de Coleta..."
+        if nome == "coleta"
+        else "Carregando Retorno da Amostra..."
+    )
 
 def voltar_inicio():
     st.session_state["modulo_atual"] = "inicio"
+    st.session_state["mostrar_loader_navegacao"] = True
+    st.session_state["mensagem_loader_navegacao"] = "Voltando ao início..."
 
 st.markdown("""
 <style>
@@ -299,6 +313,20 @@ div[data-testid="stDateInput"] label{
 
 modulo = st.session_state["modulo_atual"]
 
+navigation_loader = None
+if st.session_state.get("mostrar_loader_navegacao", False):
+    navigation_loader = st.empty()
+    navigation_loader.markdown(
+        _loader_html(
+            st.session_state.get(
+                "mensagem_loader_navegacao",
+                "Carregando...",
+            ),
+            auto_hide_ms=420,
+        ),
+        unsafe_allow_html=True,
+    )
+
 if modulo == "inicio":
     st.markdown("""
     <div class="soft-shell">
@@ -359,16 +387,18 @@ else:
         st.button("← Voltar ao início", on_click=voltar_inicio, use_container_width=True, key=f"voltar_{modulo}")
 
     if modulo == "coleta":
-        with pacman_loader("Carregando Registro de Coleta..."):
-            runpy.run_path(
-                str(BASE_DIR / "pages" / "1_Registro_de_Coleta.py"),
-                run_name="__main__",
-            )
+        runpy.run_path(
+            str(BASE_DIR / "pages" / "1_Registro_de_Coleta.py"),
+            run_name="__main__",
+        )
     elif modulo == "retorno":
-        with pacman_loader("Carregando Retorno da Amostra..."):
-            runpy.run_path(
-                str(BASE_DIR / "pages" / "2_Retorno_da_Amostra.py"),
-                run_name="__main__",
-            )
+        runpy.run_path(
+            str(BASE_DIR / "pages" / "2_Retorno_da_Amostra.py"),
+            run_name="__main__",
+        )
+
+if navigation_loader is not None:
+    navigation_loader.empty()
+    st.session_state["mostrar_loader_navegacao"] = False
 
     

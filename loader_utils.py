@@ -4,8 +4,15 @@ import html
 import streamlit as st
 
 
-def _loader_html(message: str) -> str:
+def _loader_html(message: str, auto_hide_ms: int | None = None) -> str:
     safe_message = html.escape(str(message or "Carregando..."))
+    auto_hide_style = ""
+    if auto_hide_ms is not None:
+        delay_ms = max(150, int(auto_hide_ms))
+        auto_hide_style = (
+            f"animation: oe-loader-auto-hide 160ms ease "
+            f"{delay_ms}ms forwards;"
+        )
     return f"""
     <style>
     .oe-loader-overlay {{
@@ -18,6 +25,7 @@ def _loader_html(message: str) -> str:
         background: rgba(226, 244, 217, 0.82);
         backdrop-filter: blur(5px);
         -webkit-backdrop-filter: blur(5px);
+        {auto_hide_style}
     }}
     .oe-loader-card {{
         min-width: 310px;
@@ -83,6 +91,13 @@ def _loader_html(message: str) -> str:
         margin-top: 6px;
         color: #6c7f70;
         font-size: .84rem;
+    }}
+    @keyframes oe-loader-auto-hide {{
+        to {{
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }}
     }}
     @keyframes oe-eating-top {{
         0% {{ transform: rotate(-40deg); }}
