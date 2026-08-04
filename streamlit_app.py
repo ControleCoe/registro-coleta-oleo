@@ -1,7 +1,7 @@
 from pathlib import Path
 import runpy
 import streamlit as st
-from loader_utils import _loader_html
+from loader_utils import transition_loader_html
 
 st.set_page_config(
     page_title="Controle de Amostras de Óleo",
@@ -317,12 +317,11 @@ navigation_loader = None
 if st.session_state.get("mostrar_loader_navegacao", False):
     navigation_loader = st.empty()
     navigation_loader.markdown(
-        _loader_html(
+        transition_loader_html(
             st.session_state.get(
                 "mensagem_loader_navegacao",
                 "Carregando...",
-            ),
-            auto_hide_ms=420,
+            )
         ),
         unsafe_allow_html=True,
     )
