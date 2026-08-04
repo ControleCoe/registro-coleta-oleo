@@ -1,4 +1,5 @@
 import streamlit as st
+from loader_utils import pacman_loader
 
 st.title("Registro de Coleta de Amostra de Óleo")
 st.caption("Oliveira Energia")
@@ -50,7 +51,7 @@ if st.button("✅ Enviar & Gerar PDF"):
             st.session_state["sample_row_index"] = None
             st.session_state["sample_existing_extras"] = {}
 
-        with st.spinner("Salvando no Google Sheets..."):
+        with pacman_loader("Salvando no Google Sheets..."):
             try:
                 row_idx = save_to_sheets(
                     responses,
@@ -71,7 +72,7 @@ if st.button("✅ Enviar & Gerar PDF"):
             except Exception as exc:
                 st.error(str(exc))
                 st.stop()
-        with st.spinner("Gerando PDF..."):
+        with pacman_loader("Gerando PDF..."):
             st.session_state["pdf_bytes"] = generate_pdf(responses)
         st.info("✅ PDF gerado — utilize o botão abaixo para baixar.")
 

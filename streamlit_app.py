@@ -1,6 +1,7 @@
 from pathlib import Path
 import runpy
 import streamlit as st
+from loader_utils import pacman_loader
 
 st.set_page_config(
     page_title="Controle de Amostras de Óleo",
@@ -358,8 +359,16 @@ else:
         st.button("← Voltar ao início", on_click=voltar_inicio, use_container_width=True, key=f"voltar_{modulo}")
 
     if modulo == "coleta":
-        runpy.run_path(str(BASE_DIR / "pages" / "1_Registro_de_Coleta.py"), run_name="__main__")
+        with pacman_loader("Carregando Registro de Coleta..."):
+            runpy.run_path(
+                str(BASE_DIR / "pages" / "1_Registro_de_Coleta.py"),
+                run_name="__main__",
+            )
     elif modulo == "retorno":
-        runpy.run_path(str(BASE_DIR / "pages" / "2_Retorno_da_Amostra.py"), run_name="__main__")
+        with pacman_loader("Carregando Retorno da Amostra..."):
+            runpy.run_path(
+                str(BASE_DIR / "pages" / "2_Retorno_da_Amostra.py"),
+                run_name="__main__",
+            )
 
     
