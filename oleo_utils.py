@@ -1083,6 +1083,23 @@ def _block_non_numeric_ugd_keystrokes() -> None:
         width=0,
     )
 
+def _sync_operation_location() -> None:
+    """Mantém somente uma UTE e sincroniza corretamente após limpar/reselecionar."""
+    if st is None:
+        return
+
+    key = "local_operacao_selector"
+    selected = list(st.session_state.get(key, []) or [])
+
+    # Caso duas opções sejam escolhidas muito rapidamente, mantém apenas a última.
+    if len(selected) > 1:
+        selected = [selected[-1]]
+        st.session_state[key] = selected
+
+    value = selected[0] if selected else ""
+    st.session_state.setdefault("form_values", {})["Local de operação:"] = value
+
+
 def _hide_multiselect_limit_message() -> None:
     """Oculta somente o aviso em inglês exibido pelo multiselect no limite."""
     if components is None:
@@ -1496,11 +1513,16 @@ def build_form_and_get_responses() -> Dict[str, Any]:
                         label,
                         options=OPERATION_LOCATIONS,
                         key=location_widget_key,
-                        max_selections=1,
                         placeholder="CLIQUE PARA SELECIONAR UMA UTE",
                         help="Clique no campo e selecione uma localidade. Use o X para limpar.",
+                        on_change=_sync_operation_location,
                     )
-                    _hide_multiselect_limit_message()
+
+                    # A limitação é controlada pelo callback, evitando o travamento
+                    # do componente após limpar a seleção mais de uma vez.
+                    if len(selected_locations) > 1:
+                        selected_locations = [selected_locations[-1]]
+
                     value = selected_locations[0] if selected_locations else ""
                 elif label == "UGD:":
                     ugd_key = "UGD:"
