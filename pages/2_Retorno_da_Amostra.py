@@ -9,7 +9,13 @@ import pandas as pd
 import streamlit as st
 from googleapiclient.errors import HttpError
 
-from oleo_utils import SPREADSHEET_ID, SHEET_NAME, _get_sheets_service
+from oleo_utils import (
+    SPREADSHEET_ID,
+    SHEET_NAME,
+    _get_sheets_service,
+    _fetch_main_sheet_cached,
+    _clear_main_sheet_cache,
+)
 from loader_utils import pacman_loader
 
 STATUS_COL = "AF"
@@ -86,18 +92,8 @@ def _col_to_idx(col: str) -> int:
 
 
 def fetch_sheet() -> List[List[str]]:
-    result = (
-        _svc()
-        .spreadsheets()
-        .values()
-        .get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=SHEET_NAME,
-            valueRenderOption="FORMATTED_VALUE",
-        )
-        .execute()
-    )
-    return result.get("values", [])
+    # Cache global de curta duração: vários usuários reutilizam a mesma leitura.
+    return _fetch_main_sheet_cached()
 
 
 def _unique_nonempty(values: List[str]) -> List[str]:
@@ -204,7 +200,7 @@ def _next_return_block_row() -> int:
             .values()
             .get(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{RETURN_SHEET_NAME}!A:ZZ",
+                range=f"{RETURN_SHEET_NAME}!A:A",
                 valueRenderOption="FORMATTED_VALUE",
             )
             .execute()
@@ -310,6 +306,7 @@ def update_rows(rows_idx: List[int], today: str, os_vals: List[str]) -> None:
             spreadsheetId=SPREADSHEET_ID,
             body={"valueInputOption": "RAW", "data": data},
         ).execute()
+        _clear_main_sheet_cache()
     except HttpError as exc:
         st.error(f"❌ Falha ao gravar no Google Sheets: {exc}")
         st.stop()

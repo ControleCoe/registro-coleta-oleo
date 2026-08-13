@@ -244,6 +244,45 @@ def _authorize_google_sheets() -> Credentials:
 def _get_sheets_service():
     return build("sheets", "v4", credentials=_authorize_google_sheets(), cache_discovery=False)
 
+
+if st is not None:
+    @st.cache_data(ttl=20, show_spinner=False)
+    def _fetch_main_sheet_cached():
+        """Lê a aba Geral uma vez e reaproveita o resultado por até 20 segundos."""
+        result = (
+            _get_sheets_service()
+            .spreadsheets()
+            .values()
+            .get(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"{SHEET_NAME}!A:AH",
+                valueRenderOption="FORMATTED_VALUE",
+            )
+            .execute()
+        )
+        return result.get("values", [])
+else:
+    def _fetch_main_sheet_cached():
+        result = (
+            _get_sheets_service()
+            .spreadsheets()
+            .values()
+            .get(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"{SHEET_NAME}!A:AH",
+                valueRenderOption="FORMATTED_VALUE",
+            )
+            .execute()
+        )
+        return result.get("values", [])
+
+
+def _clear_main_sheet_cache():
+    """Invalida a leitura compartilhada imediatamente após qualquer gravação."""
+    clear = getattr(_fetch_main_sheet_cached, "clear", None)
+    if callable(clear):
+        clear()
+
 # ░░░ Estrutura do formulário (labels do formulário) ░░░
 FORM_SECTIONS: List[Tuple[str, List[Tuple[str, Any]]]] = [
     (
@@ -426,21 +465,11 @@ def _coerce_sheet_value(label: str, value: Any) -> Any:
 
 
 def _fetch_sample_from_sheets(sample_number: str) -> Optional[Tuple[int, Dict[str, Any], int, Dict[str, str]]]:
-    service = _get_sheets_service()
     try:
-        result = (
-            service.spreadsheets()
-            .values()
-            .get(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"{SHEET_NAME}!A:AH",
-            )
-            .execute()
-        )
+        rows = _fetch_main_sheet_cached()
     except HttpError as exc:
         raise RuntimeError(f"Erro ao consultar planilha: {exc}") from exc
 
-    rows = result.get("values", [])
     if not rows:
         return None
 
@@ -1669,6 +1698,7 @@ def save_to_sheets(
                 valueInputOption="RAW",
                 body={"values": [row_full]},
             ).execute()
+            _clear_main_sheet_cache()
             return row_idx_int
 
         body = {"values": [row_out]}
@@ -1693,6 +1723,7 @@ def save_to_sheets(
             body={"values": [[os_value]]},
         ).execute()
 
+        _clear_main_sheet_cache()
         return row_idx_int
 
     except HttpError as exc:
