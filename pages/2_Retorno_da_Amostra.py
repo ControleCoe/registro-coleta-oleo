@@ -200,14 +200,19 @@ def _next_return_block_row() -> int:
             .values()
             .get(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{RETURN_SHEET_NAME}!A:A",
+                range=f"{RETURN_SHEET_NAME}!A:Z",
                 valueRenderOption="FORMATTED_VALUE",
             )
             .execute()
         )
     except HttpError as exc:
         raise RuntimeError(
-            f"Não foi possível consultar a aba {RETURN_SHEET_NAME}: {exc}"
+            f"Falha ao consultar a aba {RETURN_SHEET_NAME}. "
+            "Tente novamente em alguns segundos."
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            f"Não foi possível acessar a aba {RETURN_SHEET_NAME}."
         ) from exc
 
     values = result.get("values", [])
@@ -220,7 +225,6 @@ def _next_return_block_row() -> int:
         if any(str(cell or "").strip() for cell in row):
             last_used_row = row_number
 
-    # Uma linha vazia separa cada bloco.
     return last_used_row + 2
 
 
@@ -662,7 +666,10 @@ if generate:
         except Exception as exc:
             st.session_state.retorno_ultimo_fingerprint = ""
             st.session_state.retorno_ultimo_processamento_em = 0.0
-            st.error(str(exc))
+            st.error(
+                "Não foi possível criar os blocos na aba RETORNO. "
+                f"Detalhe: {exc}"
+            )
             st.stop()
 
     status_idx = _col_to_idx(STATUS_COL)
