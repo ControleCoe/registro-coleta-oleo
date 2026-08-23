@@ -1,14 +1,18 @@
 import streamlit as st
 from loader_utils import pacman_loader
 
+
 st.title("Registro de Coleta de Amostra de Óleo")
 st.caption("Oliveira Energia")
+
+
 
 
 # ────────────────────────────────────────────────────────────────────────────────
 # streamlit_app.py — aplicativo Streamlit
 # ────────────────────────────────────────────────────────────────────────────────
 from typing import Dict
+
 
 from oleo_utils import (
     build_form_and_get_responses,
@@ -19,12 +23,33 @@ from oleo_utils import (
 )
 
 
+
+
 if "pdf_bytes" not in st.session_state:
     st.session_state["pdf_bytes"] = None
+if "pdf_file_name" not in st.session_state:
+    st.session_state["pdf_file_name"] = "amostra.pdf"
+if "pdf_ready_message" not in st.session_state:
+    st.session_state["pdf_ready_message"] = ""
+
+
+# Mantém o PDF disponível mesmo depois de limpar o formulário.
+if st.session_state["pdf_bytes"]:
+    if st.session_state["pdf_ready_message"]:
+        st.success(st.session_state["pdf_ready_message"])
+    st.download_button(
+        label="⬇️ Baixar PDF",
+        data=st.session_state["pdf_bytes"],
+        file_name=st.session_state["pdf_file_name"],
+        mime="application/pdf",
+        key="baixar_pdf_ultima_coleta",
+    )
+
 
 # Barreira principal: o formulário nem é criado antes da leitura do QR Code.
 require_qr_before_form()
 responses: Dict[str, object] = build_form_and_get_responses()
+
 
 if st.button("✅ Enviar & Gerar PDF"):
     sample_no = str(responses.get("n.º da Amostra", "") or "").strip()
@@ -42,6 +67,7 @@ if st.button("✅ Enviar & Gerar PDF"):
         responses["n.º de série:"] = serial_value
         sync_sample_number(sample_no)
 
+
         last_loaded = st.session_state.get("sample_last_loaded_number", "") or ""
         existing_row = st.session_state.get("sample_row_index")
         existing_extras = dict(st.session_state.get("sample_existing_extras", {}))
@@ -50,6 +76,7 @@ if st.button("✅ Enviar & Gerar PDF"):
             existing_extras = {}
             st.session_state["sample_row_index"] = None
             st.session_state["sample_existing_extras"] = {}
+
 
         with pacman_loader("Salvando no Google Sheets..."):
             try:
@@ -74,12 +101,30 @@ if st.button("✅ Enviar & Gerar PDF"):
                 st.stop()
         with pacman_loader("Gerando PDF..."):
             st.session_state["pdf_bytes"] = generate_pdf(responses)
-        st.info("✅ PDF gerado — utilize o botão abaixo para baixar.")
+            st.session_state["pdf_file_name"] = f"amostra_{sample_no}.pdf"
 
-if st.session_state["pdf_bytes"]:
-    st.download_button(
-        label="⬇️ Baixar PDF",
-        data=st.session_state["pdf_bytes"],
-        file_name=f"amostra_{responses.get('n.º da Amostra', 'sem_numero')}.pdf",
-        mime="application/pdf",
-    )
+        # A gravação e o PDF terminaram com sucesso. Limpa somente os dados
+        # desta coleta e mantém o PDF pronto para download.
+        st.session_state["pdf_ready_message"] = (
+            f"✅ Amostra {sample_no} salva e PDF gerado. O formulário já está pronto para uma nova coleta."
+        )
+        for field_key in list(responses.keys()):
+            st.session_state.pop(field_key, None)
+        for state_key in (
+            "form_values",
+            "_pending_form_values",
+            "_sample_qr_apply_lookup",
+            "sample_qr_component_result",
+            "sample_qr_verified",
+            "sample_qr_scanner_open",
+            "sample_manual_entry",
+            "sample_manual_error",
+            "sample_row_index",
+            "sample_lookup_status",
+            "sample_lookup_message",
+            "sample_lookup_warning",
+            "sample_existing_extras",
+            "sample_last_loaded_number",
+        ):
+            st.session_state.pop(state_key, None)
+        st.rerun()
