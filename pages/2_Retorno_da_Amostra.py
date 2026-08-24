@@ -3,11 +3,14 @@ from __future__ import annotations
 import io
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import List
+from zipfile import ZipFile
 
 import pandas as pd
 import streamlit as st
 from googleapiclient.errors import HttpError
+from lxml import etree
 
 from oleo_utils import (
     SPREADSHEET_ID,
@@ -30,6 +33,11 @@ LOCAL_OPERATION_COL = "D"
 UGD_COL = "E"
 RESPONSIBLE_COL = "F"
 SERIAL_COL = "H"
+WORD_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "modelo_envio_amostras_oleo.docx"
+)
 
 st.markdown(
     """
@@ -107,6 +115,157 @@ def _unique_nonempty(values: List[str]) -> List[str]:
             unique_values.append(normalized)
 
     return unique_values
+
+
+def _batch_locality(rows_data: List[List[str]]) -> str:
+    local_idx = _col_to_idx(LOCAL_OPERATION_COL)
+    localities = _unique_nonempty(
+        [
+            str(row[local_idx]).strip() if local_idx < len(row) else ""
+            for row in rows_data
+        ]
+    )
+    return " / ".join(localities).upper() or "LOCALIDADE NÃO INFORMADA"
+
+
+def _batch_identification(locality: str, sample_count: int) -> str:
+    sample_word = "AMOSTRA" if sample_count == 1 else "AMOSTRAS"
+    return f"{locality} - {sample_count} {sample_word}"
+
+
+def _safe_file_name(value: str) -> str:
+    forbidden = '<>:"/\\|?*'
+    return "".join("-" if character in forbidden else character for character in value)
+
+
+WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+XML_NS = "http://www.w3.org/XML/1998/namespace"
+WORD_TAG = f"{{{WORD_NS}}}"
+
+
+def _word_run(text: str, *, bold: bool, color: str, size: int):
+    run = etree.Element(f"{WORD_TAG}r")
+    properties = etree.SubElement(run, f"{WORD_TAG}rPr")
+    fonts = etree.SubElement(properties, f"{WORD_TAG}rFonts")
+    fonts.set(f"{WORD_TAG}ascii", "Arial")
+    fonts.set(f"{WORD_TAG}hAnsi", "Arial")
+    fonts.set(f"{WORD_TAG}cs", "Arial")
+    if bold:
+        etree.SubElement(properties, f"{WORD_TAG}b")
+    color_element = etree.SubElement(properties, f"{WORD_TAG}color")
+    color_element.set(f"{WORD_TAG}val", color)
+    size_element = etree.SubElement(properties, f"{WORD_TAG}sz")
+    size_element.set(f"{WORD_TAG}val", str(size))
+    size_complex = etree.SubElement(properties, f"{WORD_TAG}szCs")
+    size_complex.set(f"{WORD_TAG}val", str(size))
+    text_element = etree.SubElement(run, f"{WORD_TAG}t")
+    if text.startswith(" ") or text.endswith(" "):
+        text_element.set(f"{{{XML_NS}}}space", "preserve")
+    text_element.text = text
+    return run
+
+
+def _word_paragraph_properties(paragraph, *, centered: bool) -> None:
+    properties = paragraph.find(f"{WORD_TAG}pPr")
+    if properties is None:
+        properties = etree.Element(f"{WORD_TAG}pPr")
+        paragraph.insert(0, properties)
+
+    for tag in ("jc", "spacing"):
+        for existing in properties.findall(f"{WORD_TAG}{tag}"):
+            properties.remove(existing)
+
+    alignment = etree.SubElement(properties, f"{WORD_TAG}jc")
+    alignment.set(f"{WORD_TAG}val", "center" if centered else "left")
+    if not centered:
+        spacing = etree.SubElement(properties, f"{WORD_TAG}spacing")
+        spacing.set(f"{WORD_TAG}after", "140")
+
+
+def _replace_word_paragraph(paragraph, runs, *, centered: bool) -> None:
+    for child in list(paragraph):
+        if child.tag != f"{WORD_TAG}pPr":
+            paragraph.remove(child)
+    _word_paragraph_properties(paragraph, centered=centered)
+    for run in runs:
+        paragraph.append(run)
+
+
+def _build_word_document(
+    locality: str,
+    sample_count: int,
+    request_date: str,
+) -> io.BytesIO:
+    if not WORD_TEMPLATE_PATH.exists():
+        raise RuntimeError("O modelo Word de envio de amostras não foi encontrado.")
+
+    output = io.BytesIO()
+    with ZipFile(WORD_TEMPLATE_PATH, "r") as source:
+        document_xml = source.read("word/document.xml")
+        root = etree.fromstring(document_xml)
+        namespace = {"w": WORD_NS}
+        tables = root.xpath(".//w:tbl", namespaces=namespace)
+        if not tables:
+            raise RuntimeError("O modelo Word não possui a tabela esperada.")
+
+        rows = tables[0].xpath("./w:tr", namespaces=namespace)
+        cells = rows[0].xpath("./w:tc", namespaces=namespace) if rows else []
+        if len(cells) < 2:
+            raise RuntimeError("O modelo Word de envio de amostras está inválido.")
+
+        quantity = _batch_identification("", sample_count).split(" - ", 1)[-1]
+        for cell in cells[:2]:
+            paragraphs = cell.xpath("./w:p", namespaces=namespace)
+            if len(paragraphs) < 5:
+                raise RuntimeError("O modelo Word não possui os campos esperados.")
+
+            _replace_word_paragraph(
+                paragraphs[1],
+                [_word_run(
+                    "ENVIO DE AMOSTRAS DE ÓLEO",
+                    bold=True,
+                    color="007A3D",
+                    size=22,
+                )],
+                centered=True,
+            )
+            for paragraph, label, value in (
+                (paragraphs[2], "LOCALIDADE", locality),
+                (paragraphs[3], "QUANTIDADE", quantity),
+                (paragraphs[4], "DATA", request_date),
+            ):
+                _replace_word_paragraph(
+                    paragraph,
+                    [
+                        _word_run(
+                            f"{label}: ",
+                            bold=True,
+                            color="000000",
+                            size=20,
+                        ),
+                        _word_run(
+                            value,
+                            bold=False,
+                            color="000000",
+                            size=20,
+                        ),
+                    ],
+                    centered=False,
+                )
+
+        updated_xml = etree.tostring(
+            root,
+            xml_declaration=True,
+            encoding="UTF-8",
+            standalone=True,
+        )
+        with ZipFile(output, "w") as destination:
+            for item in source.infolist():
+                data = updated_xml if item.filename == "word/document.xml" else source.read(item.filename)
+                destination.writestr(item, data)
+
+    output.seek(0)
+    return output
 
 
 def _build_return_block(
@@ -317,6 +476,7 @@ def update_rows(rows_idx: List[int], today: str, os_vals: List[str]) -> None:
 
 
 st.session_state.setdefault("retorno_lista", {})
+st.session_state.setdefault("retorno_localidades", {})
 st.session_state.setdefault("retorno_codigo", "")
 st.session_state.setdefault("retorno_os", "")
 st.session_state.setdefault("retorno_msg", "")
@@ -377,7 +537,7 @@ def _sanitize_numeric_field(key: str, max_length: int) -> None:
     )[:max_length]
 
 
-def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str]:
+def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
     try:
         sheet = fetch_sheet()
     except Exception as exc:
@@ -389,6 +549,7 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str]:
     _, *data = sheet
     sample_idx = _col_to_idx(SAMPLE_COL)
     os_idx = _col_to_idx(OS_COL)
+    locality_idx = _col_to_idx(LOCAL_OPERATION_COL)
 
     code = str(code or "").strip()
     os_value = str(os_value or "").strip()
@@ -396,16 +557,21 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str]:
     for row in data:
         row_code = str(row[sample_idx]).strip() if sample_idx < len(row) else ""
         row_os = str(row[os_idx]).strip() if os_idx < len(row) else ""
+        row_locality = (
+            str(row[locality_idx]).strip()
+            if locality_idx < len(row)
+            else ""
+        )
 
         if code and os_value:
             if row_code == code and row_os == os_value:
-                return row_code, row_os
+                return row_code, row_os, row_locality
         elif code:
             if row_code == code:
-                return row_code, row_os
+                return row_code, row_os, row_locality
         elif os_value:
             if row_os == os_value:
-                return row_code, row_os
+                return row_code, row_os, row_locality
 
     if code and os_value:
         raise RuntimeError(
@@ -442,7 +608,7 @@ def add_item() -> None:
         return
 
     try:
-        found_code, found_os = _find_sample_and_os(code, os_value)
+        found_code, found_os, found_locality = _find_sample_and_os(code, os_value)
     except Exception as exc:
         st.session_state.retorno_msg = str(exc)
         return
@@ -466,6 +632,9 @@ def add_item() -> None:
         return
 
     st.session_state.retorno_lista[found_code] = found_os
+    st.session_state.retorno_localidades[found_code] = (
+        found_locality.upper() or "LOCALIDADE NÃO INFORMADA"
+    )
     st.session_state.retorno_codigo = ""
     st.session_state.retorno_os = ""
     st.session_state.retorno_msg = ""
@@ -499,14 +668,19 @@ if st.session_state.retorno_msg:
 if st.session_state.retorno_lista:
     st.subheader("Amostras adicionadas")
     for code, os_value in list(st.session_state.retorno_lista.items()):
-        c1, c2, c3 = st.columns([3, 2, 1])
+        c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
         c1.markdown(
             f'<div class="sample-white-card">{code}</div>',
             unsafe_allow_html=True,
         )
         c2.write(f"OS {os_value}")
-        if c3.button("Remover", key=f"retorno_rm_{code}"):
+        c3.write(st.session_state.retorno_localidades.get(
+            code,
+            "LOCALIDADE NÃO INFORMADA",
+        ))
+        if c4.button("Remover", key=f"retorno_rm_{code}"):
             st.session_state.retorno_lista.pop(code, None)
+            st.session_state.retorno_localidades.pop(code, None)
             st.rerun()
 else:
     st.info("Nenhuma amostra adicionada.")
@@ -515,6 +689,7 @@ col_clear, col_generate = st.columns(2)
 with col_clear:
     if st.button("🗑️ Limpar lista", use_container_width=True):
         st.session_state.retorno_lista.clear()
+        st.session_state.retorno_localidades.clear()
         st.session_state.retorno_msg = ""
         st.rerun()
 with col_generate:
@@ -686,10 +861,20 @@ if generate:
         normalized_rows.append(row)
 
     df_ok = pd.DataFrame(normalized_rows, columns=export_header)
+    locality = _batch_locality(rows_data)
+    identification = _batch_identification(locality, len(df_ok))
+    safe_identification = _safe_file_name(identification)
 
     with pacman_loader("Gerando a planilha Excel..."):
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+            writer.book.set_properties(
+                {
+                    "title": identification,
+                    "subject": identification,
+                    "comments": "Retorno de amostras de óleo - Oliveira Energia",
+                }
+            )
             df_ok.to_excel(writer, index=False, sheet_name="Amostras")
             if missing:
                 pd.DataFrame(
@@ -701,7 +886,20 @@ if generate:
                         for code in missing
                     ]
                 ).to_excel(writer, index=False, sheet_name="Nao_Encontradas")
-        buffer.seek(0)
+        excel_buffer.seek(0)
+
+    with pacman_loader("Gerando o documento Word..."):
+        try:
+            word_buffer = _build_word_document(
+                locality,
+                len(df_ok),
+                today,
+            )
+        except Exception as exc:
+            st.session_state.retorno_ultimo_fingerprint = ""
+            st.session_state.retorno_ultimo_processamento_em = 0.0
+            st.error(f"Não foi possível gerar o documento Word: {exc}")
+            st.stop()
 
     first_row = return_block_rows[0] if return_block_rows else 0
     message = (
@@ -716,16 +914,33 @@ if generate:
     # A lista é limpa após o processamento para evitar um segundo envio acidental.
     # Os campos são limpos no próximo rerun, antes de os widgets serem criados.
     st.session_state.retorno_lista.clear()
+    st.session_state.retorno_localidades.clear()
     st.session_state.retorno_msg = ""
     st.session_state.retorno_limpar_campos = True
     st.session_state.retorno_confirmacao_aberta = False
     st.session_state.retorno_lancador_msg = ""
     st.session_state.retorno_limpar_lancador = True
 
-    st.download_button(
-        "⬇️ Baixar Excel",
-        data=buffer,
-        file_name=f"retorno_amostras_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
+    excel_column, word_column = st.columns(2)
+    with excel_column:
+        st.download_button(
+            "⬇️ Baixar planilha",
+            data=excel_buffer,
+            file_name=f"{safe_identification}.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            use_container_width=True,
+        )
+    with word_column:
+        st.download_button(
+            "⬇️ Baixar documento Word",
+            data=word_buffer,
+            file_name=f"{safe_identification}.docx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+            use_container_width=True,
+        )
