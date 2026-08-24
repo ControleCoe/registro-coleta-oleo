@@ -33,6 +33,7 @@ LOCAL_OPERATION_COL = "D"
 UGD_COL = "E"
 RESPONSIBLE_COL = "F"
 SERIAL_COL = "H"
+FLEET_COL = "I"
 WORD_TEMPLATE_PATH = (
     Path(__file__).resolve().parents[1]
     / "assets"
@@ -117,11 +118,50 @@ def _unique_nonempty(values: List[str]) -> List[str]:
     return unique_values
 
 
+def _normalize_locality(value: str) -> str:
+    locality = " ".join(str(value or "").strip().split()).upper()
+    for prefix in ("UTE - ", "UTE-", "UTE – ", "UTE—", "UTE "):
+        if locality.startswith(prefix):
+            locality = locality[len(prefix):].strip(" -–—")
+            break
+    return locality
+
+
+def _row_value(row: List[str], column: str) -> str:
+    index = _col_to_idx(column)
+    return str(row[index]).strip() if index < len(row) else ""
+
+
+def _resolve_locality(row: List[str], all_rows: List[List[str]]) -> str:
+    direct_locality = _normalize_locality(_row_value(row, LOCAL_OPERATION_COL))
+    if direct_locality:
+        return direct_locality
+
+    serial = _row_value(row, SERIAL_COL)
+    fleet = _row_value(row, FLEET_COL)
+
+    # Registros recentes podem vir sem o local preenchido. Nesse caso, usa o
+    # histórico do mesmo equipamento, priorizando o número de série e depois a frota.
+    for reference_value, column in ((serial, SERIAL_COL), (fleet, FLEET_COL)):
+        if not reference_value:
+            continue
+        for candidate in reversed(all_rows):
+            if _row_value(candidate, column) != reference_value:
+                continue
+            historical_locality = _normalize_locality(
+                _row_value(candidate, LOCAL_OPERATION_COL)
+            )
+            if historical_locality:
+                return historical_locality
+
+    return ""
+
+
 def _batch_locality(rows_data: List[List[str]]) -> str:
     local_idx = _col_to_idx(LOCAL_OPERATION_COL)
     localities = _unique_nonempty(
         [
-            str(row[local_idx]).strip() if local_idx < len(row) else ""
+            _normalize_locality(row[local_idx]) if local_idx < len(row) else ""
             for row in rows_data
         ]
     )
@@ -549,7 +589,6 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
     _, *data = sheet
     sample_idx = _col_to_idx(SAMPLE_COL)
     os_idx = _col_to_idx(OS_COL)
-    locality_idx = _col_to_idx(LOCAL_OPERATION_COL)
 
     code = str(code or "").strip()
     os_value = str(os_value or "").strip()
@@ -557,11 +596,7 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
     for row in data:
         row_code = str(row[sample_idx]).strip() if sample_idx < len(row) else ""
         row_os = str(row[os_idx]).strip() if os_idx < len(row) else ""
-        row_locality = (
-            str(row[locality_idx]).strip()
-            if locality_idx < len(row)
-            else ""
-        )
+        row_locality = _resolve_locality(row, data)
 
         if code and os_value:
             if row_code == code and row_os == os_value:
@@ -633,7 +668,7 @@ def add_item() -> None:
 
     st.session_state.retorno_lista[found_code] = found_os
     st.session_state.retorno_localidades[found_code] = (
-        found_locality.upper() or "LOCALIDADE NÃO INFORMADA"
+        _normalize_locality(found_locality) or "LOCALIDADE NÃO INFORMADA"
     )
     st.session_state.retorno_codigo = ""
     st.session_state.retorno_os = ""
@@ -862,6 +897,16 @@ if generate:
 
     df_ok = pd.DataFrame(normalized_rows, columns=export_header)
     locality = _batch_locality(rows_data)
+    if locality == "LOCALIDADE NÃO INFORMADA":
+        session_localities = _unique_nonempty(
+            [
+                _normalize_locality(value)
+                for value in st.session_state.retorno_localidades.values()
+                if value != "LOCALIDADE NÃO INFORMADA"
+            ]
+        )
+        if session_localities:
+            locality = " / ".join(session_localities)
     identification = _batch_identification(locality, len(df_ok))
     safe_identification = _safe_file_name(identification)
 
