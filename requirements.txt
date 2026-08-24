@@ -10,3 +10,4 @@ numpy>=1.26.0
 opencv-python-headless>=4.9.0.80
 pandas>=2.2
 xlsxwriter>=3.2
+lxml>=5.0
