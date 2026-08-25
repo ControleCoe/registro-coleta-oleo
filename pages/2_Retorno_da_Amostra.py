@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 from zoneinfo import ZoneInfo
-from zipfile import ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
 import streamlit as st
@@ -1011,26 +1011,22 @@ if generate:
     st.session_state.retorno_lancador_msg = ""
     st.session_state.retorno_limpar_lancador = True
 
-    excel_column, word_column = st.columns(2)
-    with excel_column:
-        st.download_button(
-            "⬇️ Baixar planilha",
-            data=excel_buffer,
-            file_name=f"{safe_identification}.xlsx",
-            mime=(
-                "application/vnd.openxmlformats-officedocument."
-                "spreadsheetml.sheet"
-            ),
-            use_container_width=True,
+    all_files_buffer = io.BytesIO()
+    with ZipFile(all_files_buffer, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr(
+            f"{safe_identification}.xlsx",
+            excel_buffer.getvalue(),
         )
-    with word_column:
-        st.download_button(
-            "⬇️ Baixar documento Word",
-            data=word_buffer,
-            file_name=f"{safe_identification}.docx",
-            mime=(
-                "application/vnd.openxmlformats-officedocument."
-                "wordprocessingml.document"
-            ),
-            use_container_width=True,
+        archive.writestr(
+            f"{safe_identification}.docx",
+            word_buffer.getvalue(),
         )
+    all_files_buffer.seek(0)
+
+    st.download_button(
+        "⬇️ Baixar todos",
+        data=all_files_buffer,
+        file_name=f"{safe_identification}.zip",
+        mime="application/zip",
+        use_container_width=True,
+    )
