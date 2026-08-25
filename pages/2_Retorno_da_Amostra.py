@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import List
+from zoneinfo import ZoneInfo
 from zipfile import ZipFile
 
 import pandas as pd
@@ -231,6 +232,16 @@ def _replace_word_paragraph(paragraph, runs, *, centered: bool) -> None:
         paragraph.append(run)
 
 
+def _set_word_paragraph_text(paragraph, text: str) -> None:
+    """Troca apenas o texto e preserva toda a formatação do modelo."""
+    text_nodes = paragraph.xpath(".//w:t", namespaces={"w": WORD_NS})
+    if not text_nodes:
+        return
+    text_nodes[0].text = text
+    for text_node in text_nodes[1:]:
+        text_node.text = ""
+
+
 def _build_word_document(
     locality: str,
     sample_count: int,
@@ -248,50 +259,36 @@ def _build_word_document(
         if not tables:
             raise RuntimeError("O modelo Word não possui a tabela esperada.")
 
-        rows = tables[0].xpath("./w:tr", namespaces=namespace)
-        cells = rows[0].xpath("./w:tc", namespaces=namespace) if rows else []
+        cells = tables[0].xpath(".//w:tc", namespaces=namespace)
         if len(cells) < 2:
             raise RuntimeError("O modelo Word de envio de amostras está inválido.")
 
-        quantity = _batch_identification("", sample_count).split(" - ", 1)[-1]
-        for cell in cells[:2]:
-            paragraphs = cell.xpath("./w:p", namespaces=namespace)
-            if len(paragraphs) < 5:
-                raise RuntimeError("O modelo Word não possui os campos esperados.")
+        replacements = {"ute": 0, "quantity": 0, "date": 0}
+        quantity_text = f"{sample_count:02d} AMOSTRAS DE ÓLEO"
+        date_text = f"DATA: {request_date}"
 
-            _replace_word_paragraph(
-                paragraphs[1],
-                [_word_run(
-                    "ENVIO DE AMOSTRAS DE ÓLEO",
-                    bold=True,
-                    color="007A3D",
-                    size=22,
-                )],
-                centered=True,
+        for paragraph in root.xpath(".//w:p", namespaces=namespace):
+            current_text = "".join(
+                node.text or ""
+                for node in paragraph.xpath(".//w:t", namespaces=namespace)
+            ).strip()
+            normalized = current_text.upper().replace("Ó", "O")
+
+            if normalized in {"UTE", "UTE -"}:
+                _set_word_paragraph_text(paragraph, f"UTE - {locality}")
+                replacements["ute"] += 1
+            elif normalized == "00 AMOSTRAS DE OLEO":
+                _set_word_paragraph_text(paragraph, quantity_text)
+                replacements["quantity"] += 1
+            elif normalized == "DATA: 00 / 00 / 2026":
+                _set_word_paragraph_text(paragraph, date_text)
+                replacements["date"] += 1
+
+        if any(count != 2 for count in replacements.values()):
+            raise RuntimeError(
+                "O modelo Word não possui os dois campos esperados de UTE, "
+                "quantidade e data."
             )
-            for paragraph, label, value in (
-                (paragraphs[2], "LOCALIDADE", locality),
-                (paragraphs[3], "QUANTIDADE", quantity),
-                (paragraphs[4], "DATA", request_date),
-            ):
-                _replace_word_paragraph(
-                    paragraph,
-                    [
-                        _word_run(
-                            f"{label}: ",
-                            bold=True,
-                            color="000000",
-                            size=20,
-                        ),
-                        _word_run(
-                            value,
-                            bold=False,
-                            color="000000",
-                            size=20,
-                        ),
-                    ],
-                    centered=False,
-                )
 
         updated_xml = etree.tostring(
             root,
@@ -648,6 +645,40 @@ def add_item() -> None:
         st.session_state.retorno_msg = str(exc)
         return
 
+    found_locality = _normalize_locality(found_locality)
+    access_locality = _normalize_locality(
+        st.session_state.get("localidade_acesso", "")
+    )
+
+    if access_locality:
+        if not found_locality:
+            st.session_state.retorno_msg = (
+                "Não foi possível confirmar a localidade desta O.S. "
+                "Ela não pode ser adicionada neste acesso."
+            )
+            return
+        if found_locality != access_locality:
+            st.session_state.retorno_msg = (
+                f"O acesso atual é de {access_locality}, mas esta O.S. "
+                f"pertence a {found_locality}. A amostra não foi adicionada."
+            )
+            return
+
+    listed_localities = _unique_nonempty(
+        [
+            _normalize_locality(value)
+            for value in st.session_state.retorno_localidades.values()
+            if value != "LOCALIDADE NÃO INFORMADA"
+        ]
+    )
+    if listed_localities and found_locality not in listed_localities:
+        st.session_state.retorno_msg = (
+            f"A lista atual pertence a {listed_localities[0]}. "
+            f"Não é permitido adicionar uma O.S. de {found_locality}. "
+            "Limpe a lista para iniciar outra localidade."
+        )
+        return
+
     if not found_code:
         st.session_state.retorno_msg = (
             "A Ordem de Serviço foi encontrada, mas não possui Código da amostra."
@@ -674,6 +705,15 @@ def add_item() -> None:
     st.session_state.retorno_os = ""
     st.session_state.retorno_msg = ""
 
+
+access_locality = _normalize_locality(
+    st.session_state.get("localidade_acesso", "")
+)
+if access_locality:
+    st.info(
+        f"Acesso da localidade: **{access_locality}**. "
+        "Somente amostras e O.S. desta localidade serão aceitas."
+    )
 
 with st.container(border=True):
     c1, c2 = st.columns(2)
@@ -861,7 +901,7 @@ if generate:
         if not rows_idx:
             st.stop()
 
-    today = datetime.now().strftime(DATE_FMT)
+    today = datetime.now(ZoneInfo("America/Manaus")).strftime(DATE_FMT)
     with pacman_loader("Gravando o retorno no Google Sheets..."):
         update_rows(rows_idx, today, os_vals)
 
@@ -897,6 +937,11 @@ if generate:
 
     df_ok = pd.DataFrame(normalized_rows, columns=export_header)
     locality = _batch_locality(rows_data)
+    access_locality = _normalize_locality(
+        st.session_state.get("localidade_acesso", "")
+    )
+    if access_locality:
+        locality = access_locality
     if locality == "LOCALIDADE NÃO INFORMADA":
         session_localities = _unique_nonempty(
             [
