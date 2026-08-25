@@ -1,3 +1,4 @@
+import html
 from pathlib import Path
 import runpy
 import streamlit as st
@@ -76,6 +77,34 @@ st.markdown("""
     color:#1f6531;
 }
 .brand span{color:#2f8f46}
+
+.access-toolbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    margin:0 0 1rem;
+    padding:.75rem 1rem;
+    background:rgba(255,255,255,.78);
+    border:1px solid rgba(47,143,70,.18);
+    border-radius:18px;
+    box-shadow:0 10px 24px rgba(54,102,46,.10);
+}
+.access-locality{color:#416348;font-size:.95rem;}
+.access-locality strong{color:#17652f;}
+.central-exit-link{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:42px;
+    padding:.65rem 1.15rem;
+    border-radius:999px;
+    background:#17743a;
+    color:#fff!important;
+    text-decoration:none!important;
+    font-weight:800;
+}
+.central-exit-link:hover{background:#105d2e;color:#fff!important;}
 
 
 .hero-grid{
@@ -317,6 +346,20 @@ div[data-testid="stDateInput"] label{
 
 </style>
 """, unsafe_allow_html=True)
+
+localidade_atual = str(st.session_state.get("localidade_acesso", "") or "").strip().upper()
+localidade_exibida = html.escape(localidade_atual or "NÃO INFORMADA")
+st.markdown(
+    f"""
+    <div class="access-toolbar">
+      <div class="access-locality">Localidade: <strong>{localidade_exibida}</strong></div>
+      <a class="central-exit-link"
+         href="https://estoque-laboratorio.kodere-tecnologia.chatgpt.site/panel/painel-direto.html?sair=1"
+         target="_self">Sair</a>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 modulo = st.session_state["modulo_atual"]
 
