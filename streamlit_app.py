@@ -12,6 +12,13 @@ st.set_page_config(
 
 BASE_DIR = Path(__file__).resolve().parent
 
+query_locality = st.query_params.get("localidade", "")
+if isinstance(query_locality, list):
+    query_locality = query_locality[0] if query_locality else ""
+detected_locality = str(query_locality or "").strip()
+if detected_locality:
+    st.session_state["localidade_acesso"] = detected_locality.upper()
+
 if "modulo_atual" not in st.session_state:
     st.session_state["modulo_atual"] = "inicio"
 
