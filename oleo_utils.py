@@ -1523,6 +1523,37 @@ def build_form_and_get_responses() -> Dict[str, Any]:
                     )
                     value = selected_date.strftime("%d/%m/%Y") if selected_date else ""
                 elif label == "Local de operação:":
+                    access_locality = str(
+                        st.session_state.get("localidade_acesso", "") or ""
+                    ).strip().upper()
+                    locked_location = ""
+                    if access_locality and access_locality != "LABORATORIO":
+                        locked_location = (
+                            access_locality
+                            if access_locality.startswith("UTE-")
+                            else f"UTE-{access_locality}"
+                        )
+                        if locked_location not in OPERATION_LOCATIONS:
+                            locked_location = ""
+
+                    if locked_location:
+                        st.session_state.setdefault("form_values", {})[
+                            "Local de operação:"
+                        ] = locked_location
+                        st.text_input(
+                            label,
+                            value=locked_location,
+                            disabled=True,
+                            help=(
+                                "Localidade preenchida automaticamente conforme "
+                                "o login de acesso."
+                            ),
+                        )
+                        value = locked_location
+                        responses[label] = value
+                        form_values[label] = value
+                        continue
+
                     current_location = str(effective_default or "").strip().upper()
                     if current_location and not current_location.startswith("UTE-"):
                         current_location = f"UTE-{current_location}"
@@ -1848,4 +1879,3 @@ def generate_pdf(responses: Dict[str, Any]) -> bytes:
 if __name__ == "__main__":
     if st is None:
         raise SystemExit("Execute via `streamlit run streamlit_app.py`.")
-
