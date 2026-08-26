@@ -41,6 +41,8 @@ SHEET_NAME = "Geral"
 # ░░░ Rótulo e coluna de destino do novo campo O.S. ░░░
 OS_FORM_LABEL = "Ordem de Serviço (O.S.)"
 OS_TARGET_COL = "AH"  # coluna onde gravaremos a O.S. após o append A..AG
+REGISTRANT_FORM_LABEL = "Responsável Pelo Registro"
+REGISTRANT_TARGET_COL = "AI"
 
 # ░░░ Localidades permitidas no campo "Local de operação" ░░░
 OPERATION_LOCATIONS: List[str] = [
@@ -255,7 +257,7 @@ if st is not None:
             .values()
             .get(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{SHEET_NAME}!A:AH",
+                range=f"{SHEET_NAME}!A:AI",
                 valueRenderOption="FORMATTED_VALUE",
             )
             .execute()
@@ -269,7 +271,7 @@ else:
             .values()
             .get(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{SHEET_NAME}!A:AH",
+                range=f"{SHEET_NAME}!A:AI",
                 valueRenderOption="FORMATTED_VALUE",
             )
             .execute()
@@ -294,6 +296,7 @@ FORM_SECTIONS: List[Tuple[str, List[Tuple[str, Any]]]] = [
             ("Local de operação:", ""),
             ("UGD:", ""),
             ("Responsável Pela Coleta:", ""),
+            (REGISTRANT_FORM_LABEL, ""),
             ("n.º da Amostra", ""),           # obrigatório
             (OS_FORM_LABEL, ""),              # NOVO campo — lado a lado no PDF
         ],
@@ -505,6 +508,12 @@ def _fetch_sample_from_sheets(sample_number: str) -> Optional[Tuple[int, Dict[st
     if os_col_idx is not None:
         cell_value = row_values[os_col_idx] if os_col_idx < len(row_values) else ""
         form_data[OS_FORM_LABEL] = "" if cell_value is None else str(cell_value)
+
+    registrant_col_idx = header_map.get(REGISTRANT_FORM_LABEL)
+    if registrant_col_idx is None:
+        registrant_col_idx = _column_letter_to_index(REGISTRANT_TARGET_COL)
+    cell_value = row_values[registrant_col_idx] if registrant_col_idx < len(row_values) else ""
+    form_data[REGISTRANT_FORM_LABEL] = "" if cell_value is None else str(cell_value)
 
     for header_name in ("Status", "Data Status"):
         idx = header_map.get(header_name)
@@ -1617,6 +1626,13 @@ def build_form_and_get_responses() -> Dict[str, Any]:
                     value = "".join(
                         ch for ch in str(value) if ch.isalpha() or ch == " "
                     )[:10]
+                elif label == REGISTRANT_FORM_LABEL:
+                    value = st.text_input(
+                        REGISTRANT_FORM_LABEL,
+                        value="" if effective_default is None else str(effective_default),
+                        max_chars=60,
+                        help="Informe o nome da pessoa responsável pelo registro.",
+                    )
                 else:
                     value = st.text_input(
                         label,
@@ -1686,8 +1702,9 @@ def save_to_sheets(
     """
     Persiste os dados no Google Sheets.
 
-    * Quando ``existing_row`` é ``None``: faz APPEND de A..AG e atualiza AH com a O.S.
-    * Quando ``existing_row`` é informado: atualiza A..AH na linha indicada, preservando
+    * Quando ``existing_row`` é ``None``: faz APPEND de A..AG e atualiza AH:AI com
+      a O.S. e o responsável pelo registro.
+    * Quando ``existing_row`` é informado: atualiza A..AI na linha indicada, preservando
       colunas não presentes no formulário (Status/Data Status) através de ``existing_extras``.
     Retorna o índice (1-based) da linha gravada/atualizada.
     """
@@ -1703,6 +1720,15 @@ def save_to_sheets(
         raise ValueError("O n.º de série deve conter exatamente 7 números.")
     responses["n.º de série:"] = serial_value
 
+    collection_date = _fmt(responses.get("Data da coleta", "")).strip()
+    if not collection_date:
+        raise ValueError("A Data da coleta é obrigatória.")
+
+    motor_hourmeter = _fmt(responses.get("Horímetro do Motor", "")).strip()
+    if not motor_hourmeter or not motor_hourmeter.isdigit():
+        raise ValueError("O Horímetro do Motor é obrigatório e deve conter somente números.")
+    responses["Horímetro do Motor"] = motor_hourmeter
+
     row_out: List[str] = []
     for hdr in SHEET_HEADERS_EXCL_OS:
         if hdr in ("Status", "Data Status"):
@@ -1716,16 +1742,27 @@ def save_to_sheets(
     if not re.fullmatch(r"\d{6}", os_value):
         raise ValueError("A Ordem de Serviço (O.S.) deve conter exatamente 6 números.")
 
+    registrant_value = _fmt(responses.get(REGISTRANT_FORM_LABEL, "")).strip()
+
     try:
         service = _get_sheets_service()
+
+        # Garante que a nova coluna exista e fique identificada tanto em registros
+        # novos quanto na edição de uma linha já existente.
+        service.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!{REGISTRANT_TARGET_COL}1",
+            valueInputOption="RAW",
+            body={"values": [[REGISTRANT_FORM_LABEL]]},
+        ).execute()
 
         if existing_row is not None:
             row_idx_int = int(existing_row)
             row_full = list(row_out)
-            row_full.append(os_value)
+            row_full.extend([os_value, registrant_value])
             service.spreadsheets().values().update(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{SHEET_NAME}!A{row_idx_int}:AH{row_idx_int}",
+                range=f"{SHEET_NAME}!A{row_idx_int}:AI{row_idx_int}",
                 valueInputOption="RAW",
                 body={"values": [row_full]},
             ).execute()
@@ -1749,9 +1786,9 @@ def save_to_sheets(
 
         service.spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!{OS_TARGET_COL}{row_idx_int}",
+            range=f"{SHEET_NAME}!{OS_TARGET_COL}{row_idx_int}:{REGISTRANT_TARGET_COL}{row_idx_int}",
             valueInputOption="RAW",
-            body={"values": [[os_value]]},
+            body={"values": [[os_value, registrant_value]]},
         ).execute()
 
         _clear_main_sheet_cache()
