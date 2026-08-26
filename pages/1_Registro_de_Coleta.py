@@ -55,10 +55,16 @@ if st.button("✅ Enviar & Gerar PDF"):
     sample_no = str(responses.get("n.º da Amostra", "") or "").strip()
     os_value = str(responses.get("Ordem de Serviço (O.S.)", "") or "").strip()
     serial_value = str(responses.get("n.º de série:", "") or "").strip()
+    collection_date = str(responses.get("Data da coleta", "") or "").strip()
+    motor_hourmeter = str(responses.get("Horímetro do Motor", "") or "").strip()
     if not (sample_no.isdigit() and len(sample_no) == 9):
         st.error("⚠️ O n.º da Amostra deve conter exatamente 9 números.")
     elif not (os_value.isdigit() and len(os_value) == 6):
         st.error("⚠️ A Ordem de Serviço (O.S.) deve conter exatamente 6 números.")
+    elif not collection_date:
+        st.error("⚠️ A Data da coleta é obrigatória.")
+    elif not motor_hourmeter or not motor_hourmeter.isdigit():
+        st.error("⚠️ O Horímetro do Motor é obrigatório e aceita somente números, sem ponto ou vírgula.")
     elif not (serial_value.isdigit() and len(serial_value) == 7):
         st.error("⚠️ O n.º de série deve conter exatamente 7 números.")
     else:
@@ -93,9 +99,9 @@ if st.button("✅ Enviar & Gerar PDF"):
                     f"Amostra {sample_no} sincronizada na linha {row_idx}."
                 )
                 if existing_row is not None:
-                    st.success(f"♻️ Registro atualizado na linha {row_idx} (A..AH).")
+                    st.success(f"♻️ Registro atualizado na linha {row_idx} (A..AI).")
                 else:
-                    st.success(f"📊 Dados gravados na linha {row_idx} (A..AH).")
+                    st.success(f"📊 Dados gravados na linha {row_idx} (A..AI).")
             except Exception as exc:
                 st.error(str(exc))
                 st.stop()
