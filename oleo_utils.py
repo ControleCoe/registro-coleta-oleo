@@ -43,6 +43,8 @@ OS_FORM_LABEL = "Ordem de Serviço (O.S.)"
 OS_TARGET_COL = "AH"  # coluna onde gravaremos a O.S. após o append A..AG
 REGISTRANT_FORM_LABEL = "Responsável Pelo Registro"
 REGISTRANT_TARGET_COL = "AI"
+REGISTRATION_DATE_FORM_LABEL = "Data do Registro"
+REGISTRATION_DATE_TARGET_COL = "AJ"
 
 # ░░░ Localidades permitidas no campo "Local de operação" ░░░
 OPERATION_LOCATIONS: List[str] = [
@@ -297,6 +299,7 @@ FORM_SECTIONS: List[Tuple[str, List[Tuple[str, Any]]]] = [
             ("UGD:", ""),
             ("Responsável Pela Coleta:", ""),
             (REGISTRANT_FORM_LABEL, ""),
+            (REGISTRATION_DATE_FORM_LABEL, ""),
             ("n.º da Amostra", ""),           # obrigatório
             (OS_FORM_LABEL, ""),              # NOVO campo — lado a lado no PDF
         ],
@@ -1743,6 +1746,8 @@ def save_to_sheets(
         raise ValueError("A Ordem de Serviço (O.S.) deve conter exatamente 6 números.")
 
     registrant_value = _fmt(responses.get(REGISTRANT_FORM_LABEL, "")).strip()
+    registration_date_value = _fmt(responses.get(REGISTRATION_DATE_FORM_LABEL, "")).strip() or datetime.now().strftime("%d/%m/%Y")
+    responses[REGISTRATION_DATE_FORM_LABEL] = registration_date_value
 
     try:
         service = _get_sheets_service()
@@ -1751,18 +1756,18 @@ def save_to_sheets(
         # novos quanto na edição de uma linha já existente.
         service.spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!{REGISTRANT_TARGET_COL}1",
+            range=f"{SHEET_NAME}!{REGISTRANT_TARGET_COL}1:AJ1",
             valueInputOption="RAW",
-            body={"values": [[REGISTRANT_FORM_LABEL]]},
+            body={"values": [[REGISTRANT_FORM_LABEL, REGISTRATION_DATE_FORM_LABEL]]},
         ).execute()
 
         if existing_row is not None:
             row_idx_int = int(existing_row)
             row_full = list(row_out)
-            row_full.extend([os_value, registrant_value])
+            row_full.extend([os_value, registrant_value, registration_date_value])
             service.spreadsheets().values().update(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{SHEET_NAME}!A{row_idx_int}:AI{row_idx_int}",
+                range=f"{SHEET_NAME}!A{row_idx_int}:AJ{row_idx_int}",
                 valueInputOption="RAW",
                 body={"values": [row_full]},
             ).execute()
@@ -1786,9 +1791,9 @@ def save_to_sheets(
 
         service.spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!{OS_TARGET_COL}{row_idx_int}:{REGISTRANT_TARGET_COL}{row_idx_int}",
+            range=f"{SHEET_NAME}!{OS_TARGET_COL}{row_idx_int}:{REGISTRATION_DATE_TARGET_COL}{row_idx_int}",
             valueInputOption="RAW",
-            body={"values": [[os_value, registrant_value]]},
+            body={"values": [[os_value, registrant_value, registration_date_value]]},
         ).execute()
 
         _clear_main_sheet_cache()
