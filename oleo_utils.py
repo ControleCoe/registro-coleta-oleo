@@ -1636,6 +1636,14 @@ def build_form_and_get_responses() -> Dict[str, Any]:
                         max_chars=60,
                         help="Informe o nome da pessoa responsável pelo registro.",
                     )
+                elif label == REGISTRATION_DATE_FORM_LABEL:
+                    value = datetime.now().strftime("%d/%m/%Y")
+                    st.text_input(
+                        REGISTRATION_DATE_FORM_LABEL,
+                        value=value,
+                        disabled=True,
+                        help="Preenchida automaticamente no momento do registro.",
+                    )
                 else:
                     value = st.text_input(
                         label,
