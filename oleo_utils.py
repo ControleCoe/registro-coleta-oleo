@@ -259,7 +259,7 @@ if st is not None:
             .values()
             .get(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{SHEET_NAME}!A:AI",
+                range=f"{SHEET_NAME}!A:AJ",
                 valueRenderOption="FORMATTED_VALUE",
             )
             .execute()
@@ -273,7 +273,7 @@ else:
             .values()
             .get(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{SHEET_NAME}!A:AI",
+                range=f"{SHEET_NAME}!A:AJ",
                 valueRenderOption="FORMATTED_VALUE",
             )
             .execute()
@@ -556,6 +556,18 @@ def _fetch_sample_from_sheets(sample_number: str) -> Optional[Tuple[int, Dict[st
         registrant_col_idx = _column_letter_to_index(REGISTRANT_TARGET_COL)
     cell_value = row_values[registrant_col_idx] if registrant_col_idx < len(row_values) else ""
     form_data[REGISTRANT_FORM_LABEL] = "" if cell_value is None else str(cell_value)
+
+    registration_date_col_idx = header_map.get(REGISTRATION_DATE_FORM_LABEL)
+    if registration_date_col_idx is None:
+        registration_date_col_idx = _column_letter_to_index(REGISTRATION_DATE_TARGET_COL)
+    cell_value = (
+        row_values[registration_date_col_idx]
+        if registration_date_col_idx < len(row_values)
+        else ""
+    )
+    form_data[REGISTRATION_DATE_FORM_LABEL] = (
+        "" if cell_value is None else str(cell_value)
+    )
 
     for header_name in ("Status", "Data Status"):
         idx = header_map.get(header_name)
@@ -1742,9 +1754,9 @@ def save_to_sheets(
     """
     Persiste os dados no Google Sheets.
 
-    * Quando ``existing_row`` é ``None``: faz APPEND de A..AG e atualiza AH:AI com
-      a O.S. e o responsável pelo registro.
-    * Quando ``existing_row`` é informado: atualiza A..AI na linha indicada, preservando
+    * Quando ``existing_row`` é ``None``: faz APPEND de A..AG e atualiza AH:AJ com
+      a O.S., o responsável e a data do registro.
+    * Quando ``existing_row`` é informado: atualiza A..AJ na linha indicada, preservando
       colunas não presentes no formulário (Status/Data Status) através de ``existing_extras``.
     Retorna o índice (1-based) da linha gravada/atualizada.
     """
