@@ -120,12 +120,32 @@ def _unique_nonempty(values: List[str]) -> List[str]:
 
 
 def _normalize_locality(value: str) -> str:
+    """Normaliza nomes equivalentes de localidades para a mesma referência."""
     locality = " ".join(str(value or "").strip().split()).upper()
     for prefix in ("UTE - ", "UTE-", "UTE – ", "UTE—", "UTE "):
         if locality.startswith(prefix):
             locality = locality[len(prefix):].strip(" -–—")
             break
-    return locality
+
+    accents = str.maketrans("ÁÀÂÃÉÊÍÓÔÕÚÜÇ", "AAAAEEIOOOUUC")
+    key = locality.translate(accents)
+    key = " ".join(key.replace("-", " ").split())
+
+    aliases = {
+        "CASTANHO 27": "CASTANHO I KM 27",
+        "CASTANHO KM 27": "CASTANHO I KM 27",
+        "CASTANHO I 27": "CASTANHO I KM 27",
+        "CASTANHO I KM 27": "CASTANHO I KM 27",
+        "CASTANHO 100": "CASTANHO II KM 100",
+        "CASTANHO KM 100": "CASTANHO II KM 100",
+        "CASTANHO II 100": "CASTANHO II KM 100",
+        "CASTANHO II KM 100": "CASTANHO II KM 100",
+        "VILA BELO MONTE": "BELO MONTE",
+        "VILA URUCURITUBA": "VILA DE URUCURITUBA",
+        "SAO SEBASTIAO DO UATUMA": "S.S. DE UATUMÃ",
+        "SANTA ISABEL DO RIO NEGRO": "SANTA ISABEL DO RN",
+    }
+    return aliases.get(key, locality)
 
 
 def _row_value(row: List[str], column: str) -> str:
@@ -614,6 +634,27 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
     raise RuntimeError("Ordem de Serviço não encontrada.")
 
 
+def _os_already_processed(os_value: str) -> bool:
+    """Retorna True quando a O.S. já recebeu retorno anteriormente."""
+    target_os = str(os_value or "").strip()
+    if not target_os:
+        return False
+    try:
+        sheet = fetch_sheet()
+    except Exception:
+        # A validação normal da amostra exibirá o erro de conexão ao usuário.
+        return False
+
+    _, *data = sheet
+    for row in data:
+        if _row_value(row, OS_COL) != target_os:
+            continue
+        status = _row_value(row, STATUS_COL).upper()
+        if status.startswith("RETORNO"):
+            return True
+    return False
+
+
 def add_item() -> None:
     _sanitize_numeric_field("retorno_codigo", 9)
     _sanitize_numeric_field("retorno_os", 6)
@@ -688,6 +729,12 @@ def add_item() -> None:
     if not found_os:
         st.session_state.retorno_msg = (
             "O Código da amostra foi encontrado, mas não possui Ordem de Serviço."
+        )
+        return
+
+    if _os_already_processed(found_os):
+        st.session_state.retorno_msg = (
+            f"A O.S. {found_os} já possui retorno registrado e não pode ser adicionada novamente."
         )
         return
 
