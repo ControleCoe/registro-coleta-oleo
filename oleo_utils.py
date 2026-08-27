@@ -361,7 +361,46 @@ def _build_base_defaults() -> Dict[str, Any]:
     return defaults
 
 
+
 BASE_FORM_DEFAULTS = _build_base_defaults()
+
+def _resolve_access_location(access_locality: Any) -> str:
+    """Converte o nome vindo do login para a UTE cadastrada no formulário."""
+    raw = str(access_locality or "").strip().upper()
+    if not raw or raw == "LABORATORIO":
+        return ""
+
+    def normalize(text: str) -> str:
+        text = text.replace("Á", "A").replace("À", "A").replace("Â", "A").replace("Ã", "A")
+        text = text.replace("É", "E").replace("Ê", "E").replace("Í", "I")
+        text = text.replace("Ó", "O").replace("Ô", "O").replace("Õ", "O")
+        text = text.replace("Ú", "U").replace("Ü", "U").replace("Ç", "C")
+        return re.sub(r"[^A-Z0-9]+", " ", text).strip()
+
+    key = normalize(raw.removeprefix("UTE-"))
+    aliases = {
+        "CASTANHO 27": "UTE-CASTANHO I KM 27",
+        "CASTANHO KM 27": "UTE-CASTANHO I KM 27",
+        "CASTANHO I 27": "UTE-CASTANHO I KM 27",
+        "CASTANHO I KM 27": "UTE-CASTANHO I KM 27",
+        "CASTANHO 100": "UTE-CASTANHO II KM 100",
+        "CASTANHO KM 100": "UTE-CASTANHO II KM 100",
+        "CASTANHO II 100": "UTE-CASTANHO II KM 100",
+        "CASTANHO II KM 100": "UTE-CASTANHO II KM 100",
+        "VILA BELO MONTE": "UTE-BELO MONTE",
+        "BELO MONTE": "UTE-BELO MONTE",
+        "VILA URUCURITUBA": "UTE-VILA DE URUCURITUBA",
+        "SÃO SEBASTIÃO DO UATUMÃ": "UTE-S.S. DE UATUMÃ",
+        "SAO SEBASTIAO DO UATUMA": "UTE-S.S. DE UATUMÃ",
+        "SANTA ISABEL DO RIO NEGRO": "UTE-SANTA ISABEL DO RN",
+    }
+    if key in aliases:
+        return aliases[key]
+
+    for option in OPERATION_LOCATIONS:
+        if normalize(option.removeprefix("UTE-")) == key:
+            return option
+    return ""
 
 # ░░░ Helpers de estado do formulário ░░░
 def _parse_date_value(value: Any) -> Optional[date]:
@@ -1535,18 +1574,8 @@ def build_form_and_get_responses() -> Dict[str, Any]:
                     )
                     value = selected_date.strftime("%d/%m/%Y") if selected_date else ""
                 elif label == "Local de operação:":
-                    access_locality = str(
-                        st.session_state.get("localidade_acesso", "") or ""
-                    ).strip().upper()
-                    locked_location = ""
-                    if access_locality and access_locality != "LABORATORIO":
-                        locked_location = (
-                            access_locality
-                            if access_locality.startswith("UTE-")
-                            else f"UTE-{access_locality}"
-                        )
-                        if locked_location not in OPERATION_LOCATIONS:
-                            locked_location = ""
+                    access_locality = st.session_state.get("localidade_acesso", "")
+                    locked_location = _resolve_access_location(access_locality)
 
                     if locked_location:
                         st.session_state.setdefault("form_values", {})[
