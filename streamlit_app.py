@@ -1,6 +1,12 @@
 import html
+import json
 from pathlib import Path
 import runpy
+from datetime import datetime
+from urllib import request
+from urllib.parse import quote
+from uuid import uuid4
+from zoneinfo import ZoneInfo
 import streamlit as st
 from loader_utils import transition_loader_html
 
@@ -12,6 +18,63 @@ st.set_page_config(
 )
 
 BASE_DIR = Path(__file__).resolve().parent
+STOCK_SHEETS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzUtD0MyAr_iZ5IybtZ41mZQtiiiUBoTvUWIzEgisjgrpxeDGMDaw1q26PRTwh6E0Eixw/exec"
+KIT_CONTRACT_MATERIAL = "KIT CONTRATO"
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def carregar_saldo_kit_contrato():
+    try:
+        with request.urlopen(STOCK_SHEETS_ENDPOINT, timeout=8) as response:
+            registros = json.loads(response.read().decode("utf-8"))
+        saldo = 0
+        for registro in registros if isinstance(registros, list) else []:
+            material = str(registro.get("material", "")).strip().upper()
+            if material != KIT_CONTRACT_MATERIAL:
+                continue
+            quantidade = float(registro.get("quantity", 0) or 0)
+            saldo += quantidade if registro.get("type") == "Entrada" else -quantidade
+        return max(0, int(round(saldo))), ""
+    except Exception:
+        return 0, "Não foi possível atualizar o saldo agora."
+
+
+def salvar_saldo_kit_contrato(quantidade_desejada, quantidade_atual, localidade):
+    diferenca = int(quantidade_desejada) - int(quantidade_atual)
+    if diferenca < 0:
+        return False, "O saldo só diminui quando uma solicitação de retorno é confirmada."
+    if diferenca == 0:
+        return True, "A quantidade já está atualizada."
+    agora = datetime.now(ZoneInfo("America/Manaus"))
+    movimento = {
+        "id": str(uuid4()),
+        "type": "Entrada",
+        "material": KIT_CONTRACT_MATERIAL,
+        "measure": "",
+        "quantity": diferenca,
+        "responsible": localidade or "LOCALIDADE",
+        "date": agora.strftime("%Y-%m-%d"),
+        "time": agora.strftime("%H:%M:%S"),
+        "origin": "kit-contract",
+        "notes": f"[HORA:{agora.strftime('%H:%M:%S')}] Ajuste do KIT CONTRATO para {quantidade_desejada}",
+    }
+    requisicao = request.Request(
+        STOCK_SHEETS_ENDPOINT,
+        data=json.dumps(movimento).encode("utf-8"),
+        headers={"Content-Type": "text/plain;charset=utf-8"},
+        method="POST",
+    )
+    try:
+        with request.urlopen(requisicao, timeout=15) as response:
+            resposta = response.read().decode("utf-8")
+        if resposta:
+            resultado = json.loads(resposta)
+            if isinstance(resultado, dict) and resultado.get("ok") is False:
+                raise RuntimeError(resultado.get("error") or "Falha ao salvar")
+        carregar_saldo_kit_contrato.clear()
+        return True, "Quantidade salva com sucesso."
+    except Exception:
+        return False, "Não foi possível salvar. Tente novamente."
 
 query_locality = st.query_params.get("localidade", "")
 if isinstance(query_locality, list):
@@ -105,6 +168,34 @@ st.markdown("""
     font-weight:800;
 }
 .central-exit-link:hover{background:#105d2e;color:#fff!important;}
+.access-actions{display:flex;align-items:center;gap:.7rem}
+.kit-contract-link{
+    display:inline-grid;
+    grid-template-columns:auto 44px;
+    align-items:stretch;
+    min-height:42px;
+    border:2px solid #17743a;
+    border-radius:12px;
+    overflow:hidden;
+    background:#fff;
+    color:#17652f!important;
+    text-decoration:none!important;
+    font-weight:900;
+    letter-spacing:.03em;
+}
+.kit-contract-link span{display:flex;align-items:center;padding:.55rem .85rem}
+.kit-contract-link strong{display:grid;place-items:center;border-left:2px solid #17743a;background:#e8f7e2;font-size:1.1rem}
+.kit-contract-card{
+    margin:-.35rem 0 1rem;
+    padding:1rem 1.1rem;
+    border:1px solid rgba(47,143,70,.18);
+    border-radius:18px;
+    background:rgba(255,255,255,.88);
+    box-shadow:0 10px 24px rgba(54,102,46,.10);
+}
+.kit-contract-card h3{margin:0;color:#17652f}
+.kit-contract-card p{margin:.25rem 0 0;color:#56705b}
+.kit-contract-close{display:inline-block;margin-top:.4rem;color:#17652f!important;font-weight:700;text-decoration:none!important}
 
 
 .hero-grid{
@@ -349,17 +440,61 @@ div[data-testid="stDateInput"] label{
 
 localidade_atual = str(st.session_state.get("localidade_acesso", "") or "").strip().upper()
 localidade_exibida = html.escape(localidade_atual or "NÃO INFORMADA")
+saldo_kit_contrato, erro_saldo_kit = carregar_saldo_kit_contrato()
+kit_aberto = str(st.query_params.get("kit_contrato", "") or "") == "1"
+localidade_url = quote(localidade_atual)
 st.markdown(
     f"""
     <div class="access-toolbar">
       <div class="access-locality">Localidade: <strong>{localidade_exibida}</strong></div>
-      <a class="central-exit-link"
-         href="https://estoque-laboratorio.kodere-tecnologia.chatgpt.site/panel/painel-direto.html?sair=1"
-         target="_self">Sair</a>
+      <div class="access-actions">
+        <a class="kit-contract-link" href="?localidade={localidade_url}&kit_contrato=1" target="_self">
+          <span>KIT CONTRATO</span><strong>{saldo_kit_contrato}</strong>
+        </a>
+        <a class="central-exit-link"
+           href="https://estoque-laboratorio.kodere-tecnologia.chatgpt.site/panel/painel-direto.html?sair=1"
+           target="_self">Sair</a>
+      </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
+
+if kit_aberto:
+    st.markdown(
+        f"""
+        <div class="kit-contract-card">
+          <h3>KIT CONTRATO</h3>
+          <p>Quantidade atual: <strong>{saldo_kit_contrato}</strong></p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.form("form_kit_contrato"):
+        quantidade_kit = st.number_input(
+            "Quantidade",
+            min_value=0,
+            step=1,
+            value=int(saldo_kit_contrato),
+        )
+        salvar_kit = st.form_submit_button("Salvar", use_container_width=True)
+    if erro_saldo_kit:
+        st.warning(erro_saldo_kit)
+    if salvar_kit:
+        sucesso_kit, mensagem_kit = salvar_saldo_kit_contrato(
+            quantidade_kit,
+            saldo_kit_contrato,
+            localidade_atual,
+        )
+        if sucesso_kit:
+            st.success(mensagem_kit)
+            st.rerun()
+        else:
+            st.error(mensagem_kit)
+    st.markdown(
+        f'<a class="kit-contract-close" href="?localidade={localidade_url}" target="_self">Fechar</a>',
+        unsafe_allow_html=True,
+    )
 
 modulo = st.session_state["modulo_atual"]
 
