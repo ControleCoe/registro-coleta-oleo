@@ -193,10 +193,10 @@ def _normalize_locality(value: str) -> str:
         "CASTANHO II KM 100": "CASTANHO II KM 100",
         "VILA BELO MONTE": "BELO MONTE",
         "VILA URUCURITUBA": "VILA DE URUCURITUBA",
-        "SAO SEBASTIAO DO UATUMA": "S.S. DE UATUMÃ",
+        "SAO SEBASTIAO DO UATUMA": "S S DE UATUMA",
         "SANTA ISABEL DO RIO NEGRO": "SANTA ISABEL DO RN",
     }
-    return aliases.get(key, locality)
+    return aliases.get(key, key)
 
 
 def _row_value(row: List[str], column: str) -> str:
