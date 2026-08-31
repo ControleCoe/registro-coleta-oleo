@@ -4,6 +4,7 @@ import io
 import json
 import re
 import time
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from urllib import request
@@ -171,8 +172,14 @@ def _normalize_locality(value: str) -> str:
             locality = locality[len(prefix):].strip(" -–—")
             break
 
-    accents = str.maketrans("ÁÀÂÃÉÊÍÓÔÕÚÜÇ", "AAAAEEIOOOUUC")
-    key = locality.translate(accents)
+    # A mesma localidade pode vir com ou sem acento na planilha.
+    # Normalizamos antes de comparar para não bloquear, por exemplo,
+    # LINDOIA e LINDÓIA.
+    key = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", locality)
+        if not unicodedata.combining(character)
+    )
     key = " ".join(key.replace("-", " ").split())
 
     aliases = {
