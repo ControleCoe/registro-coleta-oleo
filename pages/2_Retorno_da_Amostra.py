@@ -327,6 +327,15 @@ def _build_word_document(
         if len(cells) < 2:
             raise RuntimeError("O modelo Word de envio de amostras está inválido.")
 
+        # A etiqueta é impressa sem as molduras pretas pesadas do exemplo.
+        # Mantém os fundos verdes, mas remove as linhas grossas entre os campos.
+        for border in root.xpath(
+            ".//w:tblBorders/* | .//w:tcBorders/*",
+            namespaces=namespace,
+        ):
+            border.set(f"{WORD_TAG}val", "nil")
+            border.set(f"{WORD_TAG}sz", "0")
+
         replacements = {"ute": 0, "quantity": 0, "date": 0}
         quantity_text = f"{sample_count:02d} AMOSTRAS DE ÓLEO"
         date_text = f"DATA: {request_date}"
