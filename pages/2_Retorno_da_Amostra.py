@@ -346,6 +346,12 @@ def _build_word_document(
             elif re.fullmatch(r"\d+ AMOSTRAS DE OLEO", normalized):
                 _set_word_paragraph_text(paragraph, quantity_text)
                 replacements["quantity"] += 1
+            elif normalized.startswith("RM:"):
+                _set_word_paragraph_text(paragraph, "RM: -")
+            elif normalized.startswith("NF:"):
+                _set_word_paragraph_text(paragraph, "NF: -")
+            elif normalized.startswith("PARA:"):
+                _set_word_paragraph_text(paragraph, "PARA: LABORATÓRIO")
             elif normalized.startswith("DATA:"):
                 _set_word_paragraph_text(paragraph, date_text)
                 replacements["date"] += 1
