@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -337,19 +338,21 @@ def _build_word_document(
             ).strip()
             normalized = current_text.upper().replace("Ó", "O")
 
-            if normalized in {"UTE", "UTE -"}:
+            if normalized == "ENVIO DE AMOSTRAS DE OLEO":
+                _set_word_paragraph_text(paragraph, "RETORNO DE AMOSTRAS DE ÓLEO")
+            elif normalized in {"UTE", "UTE -"} or normalized.startswith("UTE - "):
                 _set_word_paragraph_text(paragraph, f"UTE - {locality}")
                 replacements["ute"] += 1
-            elif normalized == "00 AMOSTRAS DE OLEO":
+            elif re.fullmatch(r"\d+ AMOSTRAS DE OLEO", normalized):
                 _set_word_paragraph_text(paragraph, quantity_text)
                 replacements["quantity"] += 1
-            elif normalized == "DATA: 00 / 00 / 2026":
+            elif normalized.startswith("DATA:"):
                 _set_word_paragraph_text(paragraph, date_text)
                 replacements["date"] += 1
 
-        if any(count != 2 for count in replacements.values()):
+        if any(count < 1 for count in replacements.values()):
             raise RuntimeError(
-                "O modelo Word não possui os dois campos esperados de UTE, "
+                "A nova etiqueta não possui os campos esperados de UTE, "
                 "quantidade e data."
             )
 
