@@ -462,10 +462,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Kit Contrato usa um popover nativo: abrir o formulário não navega nem recarrega a tela.
-with st.popover("KIT CONTRATO"):
-    saldo_kit_contrato, erro_saldo_kit = carregar_saldo_kit_contrato(localidade_atual)
-    st.caption(f"Saldo atual: {saldo_kit_contrato}")
+# Mostra o total atual no botão. O formulário abre sem navegar nem recarregar a tela.
+saldo_total_kit, erro_total_kit = carregar_saldo_kit_contrato(localidade_atual)
+with st.popover(f"KIT CONTRATO · {saldo_total_kit}"):
+    saldo_kit_contrato, erro_saldo_kit = saldo_total_kit, erro_total_kit
+    st.caption(f"Quantidade total atual: {saldo_kit_contrato}")
     with st.form("form_kit_contrato"):
         quantidade_kit = st.number_input(
             "Quantidade a adicionar",
