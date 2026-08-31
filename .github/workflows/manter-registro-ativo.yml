@@ -1,0 +1,13 @@
+name: Manter Registro de Óleo ativo
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  aquecer-aplicativo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Abrir Registro de Óleo
+        run: curl --fail --location --max-time 45 --retry 2 https://registro-de-oleo.streamlit.app/?localidade=ARARAS
