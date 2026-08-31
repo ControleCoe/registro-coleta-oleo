@@ -1801,19 +1801,11 @@ def save_to_sheets(
     try:
         service = _get_sheets_service()
 
-        # Garante que a nova coluna exista e fique identificada tanto em registros
-        # novos quanto na edição de uma linha já existente.
-        service.spreadsheets().values().update(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!{REGISTRANT_TARGET_COL}1:AJ1",
-            valueInputOption="RAW",
-            body={"values": [[REGISTRANT_FORM_LABEL, REGISTRATION_DATE_FORM_LABEL]]},
-        ).execute()
+        row_full = list(row_out)
+        row_full.extend([os_value, registrant_value, registration_date_value])
 
         if existing_row is not None:
             row_idx_int = int(existing_row)
-            row_full = list(row_out)
-            row_full.extend([os_value, registrant_value, registration_date_value])
             service.spreadsheets().values().update(
                 spreadsheetId=SPREADSHEET_ID,
                 range=f"{SHEET_NAME}!A{row_idx_int}:AJ{row_idx_int}",
@@ -1823,13 +1815,13 @@ def save_to_sheets(
             _clear_main_sheet_cache()
             return row_idx_int
 
-        body = {"values": [row_out]}
+        # A coleta nova é gravada completa em uma única chamada à planilha.
         append_result = service.spreadsheets().values().append(
             spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!A1",
+            range=f"{SHEET_NAME}!A:AJ",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
-            body=body,
+            body={"values": [row_full]},
         ).execute()
 
         updated_range = (append_result or {}).get("updates", {}).get("updatedRange", "")
@@ -1837,14 +1829,6 @@ def save_to_sheets(
         if not m:
             raise RuntimeError(f"Não foi possível detectar a linha inserida: {updated_range}")
         row_idx_int = int(m.group(1))
-
-        service.spreadsheets().values().update(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!{OS_TARGET_COL}{row_idx_int}:{REGISTRATION_DATE_TARGET_COL}{row_idx_int}",
-            valueInputOption="RAW",
-            body={"values": [[os_value, registrant_value, registration_date_value]]},
-        ).execute()
-
         _clear_main_sheet_cache()
         return row_idx_int
 
