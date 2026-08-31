@@ -532,6 +532,46 @@ def update_rows(rows_idx: List[int], today: str, os_vals: List[str]) -> None:
         st.stop()
 
 
+def append_missing_samples(
+    codes: List[str],
+    today: str,
+    header: List[str],
+) -> tuple[List[List[str]], List[str]]:
+    """Inclui no Geral as amostras digitadas que ainda não existem."""
+    sample_idx = _col_to_idx(SAMPLE_COL)
+    os_idx = _col_to_idx(OS_COL)
+    locality_idx = _col_to_idx(LOCAL_OPERATION_COL)
+    status_idx = _col_to_idx(STATUS_COL)
+    date_idx = _col_to_idx(DATE_COL)
+    width = max(len(header), sample_idx + 1, os_idx + 1, locality_idx + 1, status_idx + 1, date_idx + 1)
+    rows: List[List[str]] = []
+    os_values: List[str] = []
+
+    for code in codes:
+        row = [""] * width
+        row[sample_idx] = code
+        row[os_idx] = st.session_state.retorno_lista[code]
+        row[locality_idx] = st.session_state.retorno_localidades.get(code, "")
+        row[status_idx] = STATUS_VAL
+        row[date_idx] = today
+        rows.append(row)
+        os_values.append(row[os_idx])
+
+    try:
+        _svc().spreadsheets().values().append(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!A:AH",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": rows},
+        ).execute()
+        _clear_main_sheet_cache()
+    except HttpError as exc:
+        raise RuntimeError(f"Não foi possível adicionar as novas amostras na planilha: {exc}") from exc
+
+    return rows, os_values
+
+
 st.session_state.setdefault("retorno_lista", {})
 st.session_state.setdefault("retorno_localidades", {})
 st.session_state.setdefault("retorno_codigo", "")
@@ -682,9 +722,17 @@ def add_item() -> None:
 
     try:
         found_code, found_os, found_locality = _find_sample_and_os(code, os_value)
-    except Exception as exc:
-        st.session_state.retorno_msg = str(exc)
-        return
+    except Exception:
+        # Quando código e O.S. ainda não estiverem no Geral, aceita o lançamento.
+        # Eles serão incluídos na planilha ao confirmar o retorno.
+        if not (code and os_value):
+            st.session_state.retorno_msg = (
+                "Informe o Código da amostra e a Ordem de Serviço para cadastrar uma nova amostra."
+            )
+            return
+        found_code = code
+        found_os = os_value
+        found_locality = st.session_state.get("localidade_acesso", "")
 
     found_locality = _normalize_locality(found_locality)
     access_locality = _normalize_locality(
@@ -939,25 +987,38 @@ if generate:
 
         all_codes = list(st.session_state.retorno_lista.keys())
         missing = [code for code in all_codes if code not in found]
+        today = datetime.now(ZoneInfo("America/Manaus")).strftime(DATE_FMT)
+        all_rows_data = list(rows_data)
+        all_os_vals = list(os_vals)
 
         if missing:
-            st.warning(
-                "As seguintes amostras não foram localizadas e não serão atualizadas: "
+            try:
+                new_rows, new_os_vals = append_missing_samples(missing, today, header)
+            except Exception as exc:
+                st.session_state.retorno_ultimo_fingerprint = ""
+                st.session_state.retorno_ultimo_processamento_em = 0.0
+                st.error(str(exc))
+                st.stop()
+            all_rows_data.extend(new_rows)
+            all_os_vals.extend(new_os_vals)
+            st.info(
+                "Amostras não encontradas foram adicionadas normalmente à planilha: "
                 + ", ".join(missing)
             )
-        if not rows_idx:
+
+        if not all_rows_data:
             st.stop()
 
-    today = datetime.now(ZoneInfo("America/Manaus")).strftime(DATE_FMT)
     with pacman_loader("Gravando o retorno no Google Sheets..."):
-        update_rows(rows_idx, today, os_vals)
+        if rows_idx:
+            update_rows(rows_idx, today, os_vals)
 
     with pacman_loader("Criando os blocos na aba RETORNO..."):
         try:
             return_block_rows = write_return_blocks_by_os(
-                rows_data,
+                all_rows_data,
                 today,
-                os_vals,
+                all_os_vals,
                 launcher_name,
             )
         except Exception as exc:
@@ -975,7 +1036,7 @@ if generate:
     export_header = list(header) + [""] * (required_width - len(header))
 
     normalized_rows = []
-    for row, os_value in zip(rows_data, os_vals):
+    for row, os_value in zip(all_rows_data, all_os_vals):
         row += [""] * (required_width - len(row))
         row[status_idx] = STATUS_VAL
         row[date_idx] = today
@@ -983,7 +1044,7 @@ if generate:
         normalized_rows.append(row)
 
     df_ok = pd.DataFrame(normalized_rows, columns=export_header)
-    locality = _batch_locality(rows_data)
+    locality = _batch_locality(all_rows_data)
     access_locality = _normalize_locality(
         st.session_state.get("localidade_acesso", "")
     )
@@ -1040,12 +1101,12 @@ if generate:
 
     first_row = return_block_rows[0] if return_block_rows else 0
     message = (
-        f"✔️ {len(df_ok)} amostra(s) atualizada(s) e exportada(s). "
+        f"✔️ {len(df_ok)} amostra(s) processada(s) e exportada(s). "
         f"{len(return_block_rows)} bloco(s) criado(s) na aba "
         f"{RETURN_SHEET_NAME}, iniciando na linha {first_row}."
     )
     if missing:
-        message += f" {len(missing)} amostra(s) não encontrada(s)."
+        message += f" {len(missing)} amostra(s) que não estavam na planilha foram adicionadas."
     st.success(message)
 
     # A lista é limpa após o processamento para evitar um segundo envio acidental.
