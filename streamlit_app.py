@@ -22,7 +22,7 @@ STOCK_SHEETS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzUtD0MyAr_iZ5I
 KIT_CONTRACT_MATERIAL = "KIT CONTRATO"
 
 
-@st.cache_data(ttl=20, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def carregar_saldo_kit_contrato():
     try:
         with request.urlopen(STOCK_SHEETS_ENDPOINT, timeout=8) as response:
@@ -440,8 +440,9 @@ div[data-testid="stDateInput"] label{
 
 localidade_atual = str(st.session_state.get("localidade_acesso", "") or "").strip().upper()
 localidade_exibida = html.escape(localidade_atual or "NÃO INFORMADA")
-saldo_kit_contrato, erro_saldo_kit = carregar_saldo_kit_contrato()
 kit_aberto = str(st.query_params.get("kit_contrato", "") or "") == "1"
+# A tela inicial abre sem esperar a planilha. O saldo é consultado apenas ao abrir o Kit.
+saldo_kit_contrato, erro_saldo_kit = carregar_saldo_kit_contrato() if kit_aberto else (None, "")
 localidade_url = quote(localidade_atual)
 st.markdown(
     f"""
@@ -449,7 +450,7 @@ st.markdown(
       <div class="access-locality">Localidade: <strong>{localidade_exibida}</strong></div>
       <div class="access-actions">
         <a class="kit-contract-link" href="?localidade={localidade_url}&kit_contrato=1" target="_self">
-          <span>KIT CONTRATO</span><strong>{saldo_kit_contrato}</strong>
+          <span>KIT CONTRATO</span>{f'<strong>{saldo_kit_contrato}</strong>' if saldo_kit_contrato is not None else ''}
         </a>
         <a class="central-exit-link"
            href="https://estoque-laboratorio.kodere-tecnologia.chatgpt.site/panel/painel-direto.html?sair=1"
