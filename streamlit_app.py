@@ -468,26 +468,31 @@ with st.popover(f"KIT CONTRATO · {saldo_total_kit}"):
     saldo_kit_contrato, erro_saldo_kit = saldo_total_kit, erro_total_kit
     st.caption(f"Quantidade total atual: {saldo_kit_contrato}")
     with st.form("form_kit_contrato"):
-        quantidade_kit = st.number_input(
+        quantidade_kit_texto = st.text_input(
             "Quantidade a adicionar",
-            min_value=0,
-            step=1,
-            value=0,
+            placeholder="Digite a quantidade",
         )
         salvar_kit = st.form_submit_button("Salvar", use_container_width=True)
     if erro_saldo_kit:
         st.warning(erro_saldo_kit)
     if salvar_kit:
-        sucesso_kit, mensagem_kit = salvar_saldo_kit_contrato(
-            quantidade_kit,
-            saldo_kit_contrato,
-            localidade_atual,
-        )
-        if sucesso_kit:
-            st.success(mensagem_kit)
-            st.rerun()
+        try:
+            quantidade_kit = int((quantidade_kit_texto or "0").strip())
+            if quantidade_kit < 0:
+                raise ValueError
+        except ValueError:
+            st.error("Informe uma quantidade inteira e positiva.")
         else:
-            st.error(mensagem_kit)
+            sucesso_kit, mensagem_kit = salvar_saldo_kit_contrato(
+                quantidade_kit,
+                saldo_kit_contrato,
+                localidade_atual,
+            )
+            if sucesso_kit:
+                st.success(mensagem_kit)
+                st.rerun()
+            else:
+                st.error(mensagem_kit)
 
 modulo = st.session_state["modulo_atual"]
 
