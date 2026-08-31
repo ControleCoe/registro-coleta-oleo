@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import io
+import json
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib import request
+from uuid import uuid4
 from typing import List
 from zoneinfo import ZoneInfo
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -40,6 +43,46 @@ WORD_TEMPLATE_PATH = (
     / "assets"
     / "modelo_envio_amostras_oleo.docx"
 )
+
+STOCK_SHEETS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzUtD0MyAr_iZ5IybtZ41mZQtiiiUBoTvUWIzEgisjgrpxeDGMDaw1q26PRTwh6E0Eixw/exec"
+KIT_CONTRACT_MATERIAL = "KIT CONTRATO"
+
+
+def baixar_kit_contrato_por_retorno(localidade: str, quantidade: int) -> None:
+    """Registra a baixa automática do Kit somente após o retorno ser confirmado."""
+    kits_utilizados = max(0, int(quantidade or 0))
+    if not kits_utilizados:
+        return
+
+    agora = datetime.now(ZoneInfo("America/Manaus"))
+    movimento = {
+        "id": str(uuid4()),
+        "type": "Baixa comum",
+        "material": KIT_CONTRACT_MATERIAL,
+        "measure": "",
+        "quantity": kits_utilizados,
+        "responsible": str(localidade or "LOCALIDADE").strip().upper(),
+        "date": agora.strftime("%Y-%m-%d"),
+        "time": agora.strftime("%H:%M:%S"),
+        "origin": "retorno-amostra",
+        "notes": (
+            f"[HORA:{agora.strftime('%H:%M:%S')}] Baixa automática de "
+            f"{kits_utilizados} KIT CONTRATO por retorno de amostra"
+        ),
+    }
+    requisicao = request.Request(
+        STOCK_SHEETS_ENDPOINT,
+        data=json.dumps(movimento).encode("utf-8"),
+        headers={"Content-Type": "text/plain;charset=utf-8"},
+        method="POST",
+    )
+    with request.urlopen(requisicao, timeout=15) as response:
+        resposta = response.read().decode("utf-8")
+    if resposta:
+        resultado = json.loads(resposta)
+        if isinstance(resultado, dict) and resultado.get("ok") is False:
+            raise RuntimeError(resultado.get("error") or "Falha ao baixar o Kit")
+
 
 st.markdown(
     """
@@ -541,6 +584,19 @@ def append_missing_samples(
     sample_idx = _col_to_idx(SAMPLE_COL)
     os_idx = _col_to_idx(OS_COL)
     locality_idx = _col_to_idx(LOCAL_OPERATION_COL)
+    # A baixa só acontece depois de o retorno ser gravado com sucesso.
+    # Cada amostra retornada consome um KIT da localidade que está logada.
+    kit_localidade = str(
+        st.session_state.get("localidade_acesso", "") or ""
+    ).strip().upper()
+    try:
+        baixar_kit_contrato_por_retorno(kit_localidade, len(all_rows_data))
+    except Exception as exc:
+        st.warning(
+            "O retorno foi registrado, mas não foi possível atualizar o saldo "
+            f"do KIT CONTRATO agora: {exc}"
+        )
+
     status_idx = _col_to_idx(STATUS_COL)
     date_idx = _col_to_idx(DATE_COL)
     width = max(len(header), sample_idx + 1, os_idx + 1, locality_idx + 1, status_idx + 1, date_idx + 1)
