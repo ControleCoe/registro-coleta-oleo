@@ -445,18 +445,14 @@ div[data-testid="stDateInput"] label{
 
 localidade_atual = str(st.session_state.get("localidade_acesso", "") or "").strip().upper()
 localidade_exibida = html.escape(localidade_atual or "NÃO INFORMADA")
-kit_aberto = str(st.query_params.get("kit_contrato", "") or "") == "1"
-# A tela inicial abre sem esperar a planilha. O saldo é consultado apenas ao abrir o Kit.
-saldo_kit_contrato, erro_saldo_kit = carregar_saldo_kit_contrato(localidade_atual) if kit_aberto else (None, "")
-localidade_url = quote(localidade_atual)
+localidade_atual = str(st.session_state.get("localidade_acesso", "") or "").strip().upper()
+localidade_exibida = html.escape(localidade_atual or "NÃO INFORMADA")
 st.markdown(
     f"""
     <div class="access-toolbar">
       <div class="access-locality">Localidade: <strong>{localidade_exibida}</strong></div>
       <div class="access-actions">
-        <a class="kit-contract-link" href="?localidade={localidade_url}&kit_contrato=1" target="_self">
-          <span>KIT CONTRATO</span>{f'<strong>{saldo_kit_contrato}</strong>' if saldo_kit_contrato is not None else ''}
-        </a>
+        <div class="kit-slot"></div>
         <a class="central-exit-link"
            href="https://estoque-laboratorio.kodere-tecnologia.chatgpt.site/panel/painel-direto.html?sair=1"
            target="_self">Sair</a>
@@ -466,16 +462,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if kit_aberto:
-    st.markdown(
-        f"""
-        <div class="kit-contract-card">
-          <h3>KIT CONTRATO</h3>
-          <p>Quantidade atual: <strong>{saldo_kit_contrato}</strong></p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+# Kit Contrato usa um popover nativo: abrir o formulário não navega nem recarrega a tela.
+with st.popover("KIT CONTRATO"):
+    saldo_kit_contrato, erro_saldo_kit = carregar_saldo_kit_contrato(localidade_atual)
+    st.caption(f"Saldo atual: {saldo_kit_contrato}")
     with st.form("form_kit_contrato"):
         quantidade_kit = st.number_input(
             "Quantidade a adicionar",
@@ -497,10 +487,6 @@ if kit_aberto:
             st.rerun()
         else:
             st.error(mensagem_kit)
-    st.markdown(
-        f'<a class="kit-contract-close" href="?localidade={localidade_url}" target="_self">Fechar</a>',
-        unsafe_allow_html=True,
-    )
 
 modulo = st.session_state["modulo_atual"]
 
