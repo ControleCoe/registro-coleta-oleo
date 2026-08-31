@@ -1,5 +1,6 @@
 import html
 import json
+import unicodedata
 from pathlib import Path
 import runpy
 from datetime import datetime
@@ -22,6 +23,17 @@ STOCK_SHEETS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzUtD0MyAr_iZ5I
 KIT_CONTRACT_MATERIAL = "KIT CONTRATO"
 
 
+def normalizar_localidade(value):
+    """Cria um nome único de localidade para dados, login e saldo."""
+    text = " ".join(str(value or "").strip().split()).upper()
+    text = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", text)
+        if not unicodedata.combining(character)
+    )
+    return text.replace("UTE - ", "").replace("UTE-", "").strip()
+
+
 @st.cache_data(ttl=120, show_spinner=False)
 def carregar_saldo_kit_contrato(localidade=""):
     try:
@@ -32,8 +44,8 @@ def carregar_saldo_kit_contrato(localidade=""):
             material = str(registro.get("material", "")).strip().upper()
             if material != KIT_CONTRACT_MATERIAL:
                 continue
-            target_localidade = str(localidade or "").strip().upper()
-            registro_localidade = str(registro.get("responsible", "")).strip().upper()
+            target_localidade = normalizar_localidade(localidade)
+            registro_localidade = normalizar_localidade(registro.get("responsible", ""))
             if target_localidade and registro_localidade != target_localidade:
                 continue
             quantidade = float(registro.get("quantity", 0) or 0)
@@ -57,7 +69,7 @@ def salvar_saldo_kit_contrato(quantidade_entrada, quantidade_atual, localidade):
         "material": KIT_CONTRACT_MATERIAL,
         "measure": "",
         "quantity": entrada,
-        "responsible": localidade or "LOCALIDADE",
+        "responsible": normalizar_localidade(localidade) or "LOCALIDADE",
         "date": agora.strftime("%Y-%m-%d"),
         "time": agora.strftime("%H:%M:%S"),
         "origin": "kit-contract",
@@ -443,7 +455,7 @@ div[data-testid="stDateInput"] label{
 </style>
 """, unsafe_allow_html=True)
 
-localidade_atual = str(st.session_state.get("localidade_acesso", "") or "").strip().upper()
+localidade_atual = normalizar_localidade(st.session_state.get("localidade_acesso", ""))
 localidade_exibida = html.escape(localidade_atual or "NÃO INFORMADA")
 localidade_atual = str(st.session_state.get("localidade_acesso", "") or "").strip().upper()
 localidade_exibida = html.escape(localidade_atual or "NÃO INFORMADA")
