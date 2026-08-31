@@ -245,8 +245,13 @@ def _authorize_google_sheets() -> Credentials:
 
     return creds
 
-def _get_sheets_service():
-    return build("sheets", "v4", credentials=_authorize_google_sheets(), cache_discovery=False)
+if st is not None:
+    @st.cache_resource(show_spinner=False)
+    def _get_sheets_service():
+        return build("sheets", "v4", credentials=_authorize_google_sheets(), cache_discovery=False)
+else:
+    def _get_sheets_service():
+        return build("sheets", "v4", credentials=_authorize_google_sheets(), cache_discovery=False)
 
 
 if st is not None:
