@@ -31,6 +31,8 @@ if "pdf_file_name" not in st.session_state:
     st.session_state["pdf_file_name"] = "amostra.pdf"
 if "pdf_ready_message" not in st.session_state:
     st.session_state["pdf_ready_message"] = ""
+if "pdf_pending_responses" not in st.session_state:
+    st.session_state["pdf_pending_responses"] = None
 
 
 # Mantém o PDF disponível mesmo depois de limpar o formulário.
@@ -46,12 +48,24 @@ if st.session_state["pdf_bytes"]:
     )
 
 
+# O PDF é gerado sob demanda, para o salvamento não ficar esperando a montagem do arquivo.
+if st.session_state["pdf_pending_responses"]:
+    if st.button("📄 Gerar PDF da última coleta", use_container_width=True):
+        pending_responses = st.session_state["pdf_pending_responses"]
+        with pacman_loader("Gerando PDF..."):
+            sample_for_pdf = str(pending_responses.get("n.º da Amostra", "amostra"))
+            st.session_state["pdf_bytes"] = generate_pdf(pending_responses)
+            st.session_state["pdf_file_name"] = f"amostra_{sample_for_pdf}.pdf"
+            st.session_state["pdf_ready_message"] = "PDF gerado e pronto para baixar."
+            st.session_state["pdf_pending_responses"] = None
+        st.rerun()
+
 # Barreira principal: o formulário nem é criado antes da leitura do QR Code.
 require_qr_before_form()
 responses: Dict[str, object] = build_form_and_get_responses()
 
 
-if st.button("✅ Enviar & Gerar PDF"):
+if st.button("✅ Salvar coleta"):
     sample_no = str(responses.get("n.º da Amostra", "") or "").strip()
     os_value = str(responses.get("Ordem de Serviço (O.S.)", "") or "").strip()
     serial_value = str(responses.get("n.º de série:", "") or "").strip()
@@ -105,14 +119,11 @@ if st.button("✅ Enviar & Gerar PDF"):
             except Exception as exc:
                 st.error(str(exc))
                 st.stop()
-        with pacman_loader("Gerando PDF..."):
-            st.session_state["pdf_bytes"] = generate_pdf(responses)
-            st.session_state["pdf_file_name"] = f"amostra_{sample_no}.pdf"
+        st.session_state["pdf_pending_responses"] = dict(responses)
 
-        # A gravação e o PDF terminaram com sucesso. Limpa somente os dados
-        # desta coleta e mantém o PDF pronto para download.
+        # A gravação terminou com sucesso. O PDF pode ser gerado depois, sem atrasar o salvamento.
         st.session_state["pdf_ready_message"] = (
-            f"✅ Amostra {sample_no} salva e PDF gerado. O formulário já está pronto para uma nova coleta."
+            f"✅ Amostra {sample_no} salva. O formulário já está pronto para uma nova coleta."
         )
         for field_key in list(responses.keys()):
             st.session_state.pop(field_key, None)
