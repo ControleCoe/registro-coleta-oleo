@@ -23,7 +23,7 @@ KIT_CONTRACT_MATERIAL = "KIT CONTRATO"
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def carregar_saldo_kit_contrato():
+def carregar_saldo_kit_contrato(localidade=""):
     try:
         with request.urlopen(STOCK_SHEETS_ENDPOINT, timeout=8) as response:
             registros = json.loads(response.read().decode("utf-8"))
@@ -32,6 +32,10 @@ def carregar_saldo_kit_contrato():
             material = str(registro.get("material", "")).strip().upper()
             if material != KIT_CONTRACT_MATERIAL:
                 continue
+            target_localidade = str(localidade or "").strip().upper()
+            registro_localidade = str(registro.get("responsible", "")).strip().upper()
+            if target_localidade and registro_localidade != target_localidade:
+                continue
             quantidade = float(registro.get("quantity", 0) or 0)
             saldo += quantidade if registro.get("type") == "Entrada" else -quantidade
         return max(0, int(round(saldo))), ""
@@ -39,24 +43,25 @@ def carregar_saldo_kit_contrato():
         return 0, "Não foi possível atualizar o saldo agora."
 
 
-def salvar_saldo_kit_contrato(quantidade_desejada, quantidade_atual, localidade):
-    diferenca = int(quantidade_desejada) - int(quantidade_atual)
-    if diferenca < 0:
-        return False, "O saldo só diminui quando uma solicitação de retorno é confirmada."
-    if diferenca == 0:
-        return True, "A quantidade já está atualizada."
+def salvar_saldo_kit_contrato(quantidade_entrada, quantidade_atual, localidade):
+    entrada = int(quantidade_entrada)
+    if entrada < 0:
+        return False, "Informe uma quantidade positiva."
+    if entrada == 0:
+        return True, "Nenhuma entrada foi adicionada."
+    novo_saldo = int(quantidade_atual) + entrada
     agora = datetime.now(ZoneInfo("America/Manaus"))
     movimento = {
         "id": str(uuid4()),
         "type": "Entrada",
         "material": KIT_CONTRACT_MATERIAL,
         "measure": "",
-        "quantity": diferenca,
+        "quantity": entrada,
         "responsible": localidade or "LOCALIDADE",
         "date": agora.strftime("%Y-%m-%d"),
         "time": agora.strftime("%H:%M:%S"),
         "origin": "kit-contract",
-        "notes": f"[HORA:{agora.strftime('%H:%M:%S')}] Ajuste do KIT CONTRATO para {quantidade_desejada}",
+        "notes": f"[HORA:{agora.strftime('%H:%M:%S')}] Entrada de {entrada} no KIT CONTRATO; novo saldo {novo_saldo}",
     }
     requisicao = request.Request(
         STOCK_SHEETS_ENDPOINT,
@@ -442,7 +447,7 @@ localidade_atual = str(st.session_state.get("localidade_acesso", "") or "").stri
 localidade_exibida = html.escape(localidade_atual or "NÃO INFORMADA")
 kit_aberto = str(st.query_params.get("kit_contrato", "") or "") == "1"
 # A tela inicial abre sem esperar a planilha. O saldo é consultado apenas ao abrir o Kit.
-saldo_kit_contrato, erro_saldo_kit = carregar_saldo_kit_contrato() if kit_aberto else (None, "")
+saldo_kit_contrato, erro_saldo_kit = carregar_saldo_kit_contrato(localidade_atual) if kit_aberto else (None, "")
 localidade_url = quote(localidade_atual)
 st.markdown(
     f"""
@@ -473,10 +478,10 @@ if kit_aberto:
     )
     with st.form("form_kit_contrato"):
         quantidade_kit = st.number_input(
-            "Quantidade",
+            "Quantidade a adicionar",
             min_value=0,
             step=1,
-            value=int(saldo_kit_contrato),
+            value=0,
         )
         salvar_kit = st.form_submit_button("Salvar", use_container_width=True)
     if erro_saldo_kit:
