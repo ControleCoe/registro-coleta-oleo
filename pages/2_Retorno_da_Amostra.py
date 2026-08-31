@@ -780,12 +780,6 @@ def add_item() -> None:
         )
         return
 
-    if _os_already_processed(found_os):
-        st.session_state.retorno_msg = (
-            f"A O.S. {found_os} já possui retorno registrado e não pode ser adicionada novamente."
-        )
-        return
-
     if found_code in st.session_state.retorno_lista:
         st.session_state.retorno_msg = (
             f"A amostra {found_code} já foi adicionada."
