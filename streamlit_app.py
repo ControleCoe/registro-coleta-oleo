@@ -479,12 +479,12 @@ saldo_total_kit, erro_total_kit = carregar_saldo_kit_contrato(localidade_atual)
 with st.popover(f"KIT CONTRATO · {saldo_total_kit}"):
     saldo_kit_contrato, erro_saldo_kit = saldo_total_kit, erro_total_kit
     st.caption(f"Quantidade total atual: {saldo_kit_contrato}")
-    with st.form("form_kit_contrato"):
-        quantidade_kit_texto = st.text_input(
-            "Quantidade a adicionar",
-            placeholder="Digite a quantidade",
-        )
-        salvar_kit = st.form_submit_button("Salvar", use_container_width=True)
+    quantidade_kit_texto = st.text_input(
+        "Quantidade a adicionar",
+        placeholder="Digite a quantidade",
+        key="quantidade_kit_contrato",
+    )
+    salvar_kit = st.button("Salvar", use_container_width=True, type="primary")
     if erro_saldo_kit:
         st.warning(erro_saldo_kit)
     if salvar_kit:
