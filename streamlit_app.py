@@ -34,7 +34,7 @@ def normalizar_localidade(value):
     return text.replace("UTE - ", "").replace("UTE-", "").strip()
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def carregar_saldo_kit_contrato(localidade=""):
     try:
         with request.urlopen(STOCK_SHEETS_ENDPOINT, timeout=8) as response:
