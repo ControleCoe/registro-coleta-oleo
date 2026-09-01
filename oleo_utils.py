@@ -255,9 +255,9 @@ else:
 
 
 if st is not None:
-    @st.cache_data(ttl=20, show_spinner=False)
+    @st.cache_data(ttl=120, show_spinner=False)
     def _fetch_main_sheet_cached():
-        """Lê a aba Geral uma vez e reaproveita o resultado por até 20 segundos."""
+        """Lê a aba Geral uma vez e reaproveita o resultado por até 2 minutos."""
         result = (
             _get_sheets_service()
             .spreadsheets()
