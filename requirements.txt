@@ -2,6 +2,7 @@ streamlit>=1.36
 Google-auth>=2.20
 google-auth-oauthlib>=1.0.0
 google-api-python-client>=2.100.0
+httplib2>=0.22.0
 fpdf2>=2.7.6
 qrcode[pil]>=7.4.2
 pillow>=9.5.0
@@ -11,3 +12,4 @@ opencv-python-headless>=4.9.0.80
 pandas>=2.2
 xlsxwriter>=3.2
 lxml>=5.0
+
