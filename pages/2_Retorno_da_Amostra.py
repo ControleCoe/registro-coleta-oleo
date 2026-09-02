@@ -764,7 +764,7 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
                 valueRenderOption="FORMATTED_VALUE",
             ).execute()
         )
-    except SampleLookupNotFound:
+    except Exception:
         raise
     except Exception as exc:
         raise RuntimeError("Não foi possível consultar a O.S. na planilha.") from exc
@@ -823,7 +823,7 @@ def _os_already_processed(os_value: str) -> bool:
         return False
     try:
         sheet = fetch_sheet()
-    except SampleLookupNotFound:
+    except Exception:
         # A validação normal da amostra exibirá o erro de conexão ao usuário.
         return False
 
@@ -865,12 +865,12 @@ def add_item() -> None:
 
     try:
         found_code, found_os, found_locality = _find_sample_and_os(code, os_value)
-    except Exception:
+    except SampleLookupNotFound:
         # Quando código e O.S. ainda não estiverem no Geral, aceita o lançamento.
         # Eles serão incluídos na planilha ao confirmar o retorno.
-        if not (code and os_value):
+        if not code:
             st.session_state.retorno_msg = (
-                "Informe o Código da amostra e a Ordem de Serviço para cadastrar uma nova amostra."
+                f"A O.S. {os_value} não foi encontrada na planilha."
             )
             return
         found_code = code
@@ -952,21 +952,13 @@ if access_locality:
     )
 
 with st.form("adicionar_amostra", border=True, enter_to_submit=True):
-    c1, c2 = st.columns(2)
-    with c1:
-        st.text_input(
-            "Código da amostra",
-            key="retorno_codigo",
-            max_chars=9,
-            placeholder="9 números",
-        )
-    with c2:
-        st.text_input(
-            "Ordem de Serviço",
-            key="retorno_os",
-            max_chars=6,
-            placeholder="6 números",
-        )
+    st.text_input(
+        "Ordem de Serviço",
+        key="retorno_os",
+        max_chars=6,
+        placeholder="6 números",
+        help="Informe somente a O.S. para adicionar a amostra vinculada.",
+    )
     adicionar_amostra = st.form_submit_button(
         "➕ Adicionar amostra",
         use_container_width=True,
