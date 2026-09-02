@@ -778,6 +778,44 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
     return found_code, found_os, found_locality
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _return_header() -> List[str]:
+    result = (
+        _svc().spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!A1:AJ1",
+            valueRenderOption="FORMATTED_VALUE",
+        ).execute()
+    )
+    return list((result.get("values") or [[]])[0])
+
+
+def _load_return_rows(codes: List[str]) -> tuple[List[str], List[int], List[List[str]]]:
+    """Carrega somente as linhas que serão processadas no retorno."""
+    header = _return_header()
+    samples = _lookup_column(SAMPLE_COL)
+    row_for_code = {}
+    requested = set(codes)
+    for row_number, value in enumerate(samples, start=1):
+        if row_number > 1 and value in requested:
+            row_for_code[value] = row_number
+
+    ordered = [(code, row_for_code[code]) for code in codes if code in row_for_code]
+    if not ordered:
+        return header, [], []
+
+    result = (
+        _svc().spreadsheets().values().batchGet(
+            spreadsheetId=SPREADSHEET_ID,
+            ranges=[f"{SHEET_NAME}!A{row}:AJ{row}" for _, row in ordered],
+            valueRenderOption="FORMATTED_VALUE",
+        ).execute()
+    )
+    value_ranges = result.get("valueRanges", [])
+    rows = [list((item.get("values") or [[]])[0]) for item in value_ranges]
+    return header, [row for _, row in ordered], rows
+
+
 def _os_already_processed(os_value: str) -> bool:
     """Retorna True quando a O.S. já recebeu retorno anteriormente."""
     target_os = str(os_value or "").strip()
@@ -1065,32 +1103,30 @@ if generate:
 
     with pacman_loader("Consultando a planilha..."):
         try:
-            sheet = fetch_sheet()
+            all_codes = list(st.session_state.retorno_lista.keys())
+            header, rows_idx, rows_data = _load_return_rows(all_codes)
         except Exception as exc:
             st.session_state.retorno_ultimo_fingerprint = ""
             st.session_state.retorno_ultimo_processamento_em = 0.0
             st.error(f"Não foi possível consultar o Google Sheets: {exc}")
             st.stop()
 
-        if not sheet:
+        if not header:
             st.error("A aba da planilha está vazia.")
             st.stop()
 
-        header, *data = sheet
         sample_idx = _col_to_idx(SAMPLE_COL)
-        os_idx = _col_to_idx(OS_COL)
-        rows_idx, os_vals, rows_data = [], [], []
-        found = set()
-
-        for row_number, row in enumerate(data, start=2):
-            code = str(row[sample_idx]).strip() if sample_idx < len(row) else ""
-            if code in st.session_state.retorno_lista:
-                rows_idx.append(row_number)
-                os_vals.append(st.session_state.retorno_lista[code])
-                rows_data.append(list(row))
-                found.add(code)
-
-        all_codes = list(st.session_state.retorno_lista.keys())
+        os_vals = [
+            st.session_state.retorno_lista.get(
+                str(row[sample_idx]).strip() if sample_idx < len(row) else "", ""
+            )
+            for row in rows_data
+        ]
+        found = {
+            str(row[sample_idx]).strip()
+            for row in rows_data
+            if sample_idx < len(row)
+        }
         missing = [code for code in all_codes if code not in found]
         today = datetime.now(ZoneInfo("America/Manaus")).strftime(DATE_FMT)
         all_rows_data = list(rows_data)
