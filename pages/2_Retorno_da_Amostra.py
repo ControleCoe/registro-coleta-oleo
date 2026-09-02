@@ -894,7 +894,7 @@ if access_locality:
         "Somente amostras e O.S. desta localidade serão aceitas."
     )
 
-with st.container(border=True):
+with st.form("adicionar_amostra", border=True, enter_to_submit=True):
     c1, c2 = st.columns(2)
     with c1:
         st.text_input(
@@ -902,8 +902,6 @@ with st.container(border=True):
             key="retorno_codigo",
             max_chars=9,
             placeholder="9 números",
-            on_change=_sanitize_numeric_field,
-            args=("retorno_codigo", 9),
         )
     with c2:
         st.text_input(
@@ -911,10 +909,14 @@ with st.container(border=True):
             key="retorno_os",
             max_chars=6,
             placeholder="6 números",
-            on_change=_sanitize_numeric_field,
-            args=("retorno_os", 6),
         )
-    st.button("➕ Adicionar amostra", on_click=add_item, use_container_width=True)
+    adicionar_amostra = st.form_submit_button(
+        "➕ Adicionar amostra",
+        use_container_width=True,
+    )
+
+if adicionar_amostra:
+    add_item()
 
 if st.session_state.retorno_msg:
     st.warning(st.session_state.retorno_msg)
