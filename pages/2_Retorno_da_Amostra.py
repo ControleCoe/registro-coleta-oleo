@@ -717,9 +717,10 @@ def _validate_launcher_name(name: str) -> str:
     return ""
 
 
-def _sanitize_numeric_field(key: str, max_length: int) -> None:
-    raw_value = str(st.session_state.get(key, "") or "")
-    st.session_state[key] = "".join(
+def _sanitize_numeric_value(value: str, max_length: int) -> str:
+    """Limpa o valor sem alterar os widgets já exibidos pelo Streamlit."""
+    raw_value = str(value or "")
+    return "".join(
         character for character in raw_value if character.isdigit()
     )[:max_length]
 
@@ -786,11 +787,12 @@ def _os_already_processed(os_value: str) -> bool:
 
 
 def add_item() -> None:
-    _sanitize_numeric_field("retorno_codigo", 9)
-    _sanitize_numeric_field("retorno_os", 6)
-
-    code = st.session_state.retorno_codigo.strip()
-    os_value = st.session_state.retorno_os.strip()
+    code = _sanitize_numeric_value(
+        st.session_state.get("retorno_codigo", ""), 9
+    )
+    os_value = _sanitize_numeric_value(
+        st.session_state.get("retorno_os", ""), 6
+    )
 
     if not code and not os_value:
         st.session_state.retorno_msg = (
@@ -880,8 +882,9 @@ def add_item() -> None:
     st.session_state.retorno_localidades[found_code] = (
         _normalize_locality(found_locality) or "LOCALIDADE NÃO INFORMADA"
     )
-    st.session_state.retorno_codigo = ""
-    st.session_state.retorno_os = ""
+    # Os campos já foram exibidos nesta execução. A limpeza acontece no
+    # próximo rerun, antes dos widgets serem criados novamente.
+    st.session_state.retorno_limpar_campos = True
     st.session_state.retorno_msg = ""
 
 
