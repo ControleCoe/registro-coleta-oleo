@@ -484,7 +484,9 @@ def _next_return_block_row() -> int:
             .values()
             .get(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{RETURN_SHEET_NAME}!A:Z",
+                # A primeira coluna é preenchida em todos os blocos. Ler somente
+                # ela evita baixar a aba RETORNO inteira a cada processamento.
+                range=f"{RETURN_SHEET_NAME}!A:A",
                 valueRenderOption="FORMATTED_VALUE",
             )
             .execute()
@@ -537,6 +539,7 @@ def write_return_blocks_by_os(
 
     next_row = _next_return_block_row()
     created_rows: List[int] = []
+    updates = []
 
     for os_value, grouped_data in grouped_rows.items():
         block = _build_return_block(
@@ -546,30 +549,36 @@ def write_return_blocks_by_os(
             os_value,
         )
 
-        try:
-            (
-                _svc()
-                .spreadsheets()
-                .values()
-                .update(
-                    spreadsheetId=SPREADSHEET_ID,
-                    range=f"{RETURN_SHEET_NAME}!A{next_row}",
-                    valueInputOption="RAW",
-                    body={"values": block},
-                )
-                .execute()
-            )
-        except HttpError as exc:
-            raise RuntimeError(
-                f"Não foi possível gravar o bloco da OS {os_value} "
-                f"na aba {RETURN_SHEET_NAME}: {exc}"
-            ) from exc
+        updates.append(
+            {
+                "range": f"{RETURN_SHEET_NAME}!A{next_row}",
+                "values": block,
+            }
+        )
 
         created_rows.append(next_row)
 
         # Cada bloco ocupa duas linhas: cabeçalho e dados.
         # A próxima OS começa após uma linha vazia.
         next_row += len(block) + 1
+
+    # Todas as O.S. do retorno são enviadas em uma única comunicação com a
+    # planilha. Isso evita uma espera repetida para cada bloco.
+    try:
+        (
+            _svc()
+            .spreadsheets()
+            .values()
+            .batchUpdate(
+                spreadsheetId=SPREADSHEET_ID,
+                body={"valueInputOption": "RAW", "data": updates},
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        raise RuntimeError(
+            f"Não foi possível gravar os blocos na aba {RETURN_SHEET_NAME}: {exc}"
+        ) from exc
 
     return created_rows
 
@@ -1213,3 +1222,4 @@ if generate:
         mime="application/zip",
         use_container_width=True,
     )
+
