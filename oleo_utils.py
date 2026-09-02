@@ -16,6 +16,7 @@ from datetime import datetime, date
 from typing import Dict, List, Tuple, Any, Optional
 
 import qrcode
+import httplib2
 from fpdf import FPDF
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -248,10 +249,24 @@ def _authorize_google_sheets() -> Credentials:
 if st is not None:
     @st.cache_resource(show_spinner=False)
     def _get_sheets_service():
-        return build("sheets", "v4", credentials=_authorize_google_sheets(), cache_discovery=False)
+        # Evita que indisponibilidade do Google mantenha Cadastro ou Retorno
+        # carregando indefinidamente.
+        return build(
+            "sheets",
+            "v4",
+            credentials=_authorize_google_sheets(),
+            http=httplib2.Http(timeout=15),
+            cache_discovery=False,
+        )
 else:
     def _get_sheets_service():
-        return build("sheets", "v4", credentials=_authorize_google_sheets(), cache_discovery=False)
+        return build(
+            "sheets",
+            "v4",
+            credentials=_authorize_google_sheets(),
+            http=httplib2.Http(timeout=15),
+            cache_discovery=False,
+        )
 
 
 if st is not None:
