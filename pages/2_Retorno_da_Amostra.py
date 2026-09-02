@@ -725,44 +725,57 @@ def _sanitize_numeric_value(value: str, max_length: int) -> str:
     )[:max_length]
 
 
+class SampleLookupNotFound(RuntimeError):
+    pass
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _lookup_column(column: str) -> List[str]:
+    """Carrega apenas uma coluna para localizar a amostra rapidamente."""
+    result = (
+        _svc().spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!{column}:{column}",
+            valueRenderOption="FORMATTED_VALUE",
+        ).execute()
+    )
+    return [str(row[0]).strip() if row else "" for row in result.get("values", [])]
+
+
 def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
-    try:
-        sheet = fetch_sheet()
-    except Exception as exc:
-        raise RuntimeError(f"Não foi possível consultar o Google Sheets: {exc}") from exc
-
-    if not sheet:
-        raise RuntimeError("A aba da planilha está vazia.")
-
-    _, *data = sheet
-    sample_idx = _col_to_idx(SAMPLE_COL)
-    os_idx = _col_to_idx(OS_COL)
-
+    """Localiza por O.S. ou amostra sem baixar a aba Geral inteira."""
     code = str(code or "").strip()
     os_value = str(os_value or "").strip()
+    lookup_column = OS_COL if os_value else SAMPLE_COL
+    lookup_value = os_value or code
 
-    for row in data:
-        row_code = str(row[sample_idx]).strip() if sample_idx < len(row) else ""
-        row_os = str(row[os_idx]).strip() if os_idx < len(row) else ""
-        row_locality = _resolve_locality(row, data)
-
-        if code and os_value:
-            if row_code == code and row_os == os_value:
-                return row_code, row_os, row_locality
-        elif code:
-            if row_code == code:
-                return row_code, row_os, row_locality
-        elif os_value:
-            if row_os == os_value:
-                return row_code, row_os, row_locality
-
-    if code and os_value:
-        raise RuntimeError(
-            "A combinação entre Código da amostra e Ordem de Serviço não foi encontrada."
+    try:
+        values = _lookup_column(lookup_column)
+        row_number = next(
+            (idx for idx, value in enumerate(values, start=1) if value == lookup_value),
+            None,
         )
-    if code:
-        raise RuntimeError("Código da amostra não encontrado.")
-    raise RuntimeError("Ordem de Serviço não encontrada.")
+        if row_number is None:
+            raise SampleLookupNotFound()
+        result = (
+            _svc().spreadsheets().values().get(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"{SHEET_NAME}!D{row_number}:AH{row_number}",
+                valueRenderOption="FORMATTED_VALUE",
+            ).execute()
+        )
+    except SampleLookupNotFound:
+        raise
+    except Exception as exc:
+        raise RuntimeError("Não foi possível consultar a O.S. na planilha.") from exc
+
+    row = [""] * 3 + list((result.get("values") or [[]])[0])
+    found_code = _row_value(row, SAMPLE_COL)
+    found_os = _row_value(row, OS_COL)
+    found_locality = _normalize_locality(_row_value(row, LOCAL_OPERATION_COL))
+    if (code and found_code != code) or (os_value and found_os != os_value):
+        raise SampleLookupNotFound()
+    return found_code, found_os, found_locality
 
 
 def _os_already_processed(os_value: str) -> bool:
@@ -772,7 +785,7 @@ def _os_already_processed(os_value: str) -> bool:
         return False
     try:
         sheet = fetch_sheet()
-    except Exception:
+    except SampleLookupNotFound:
         # A validação normal da amostra exibirá o erro de conexão ao usuário.
         return False
 
@@ -825,6 +838,9 @@ def add_item() -> None:
         found_code = code
         found_os = os_value
         found_locality = st.session_state.get("localidade_acesso", "")
+    except Exception as exc:
+        st.session_state.retorno_msg = str(exc)
+        return
 
     found_locality = _normalize_locality(found_locality)
     access_locality = _normalize_locality(
