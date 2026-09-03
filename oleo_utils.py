@@ -22,6 +22,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google_auth_httplib2 import AuthorizedHttp
 
 from barcode import Code128
 from barcode.writer import ImageWriter
@@ -249,20 +250,23 @@ def _authorize_google_sheets() -> Credentials:
 if st is not None:
     @st.cache_resource(show_spinner=False)
     def _get_sheets_service():
-        # Evita que indisponibilidade do Google mantenha Cadastro ou Retorno
-        # carregando indefinidamente.
+        # O cliente padrão não limita a espera de rede. Usa o transporte
+        # autorizado com timeout para que cadastro e retorno exibam erro em
+        # vez de permanecerem carregando indefinidamente.
+        credentials = _authorize_google_sheets()
         return build(
             "sheets",
             "v4",
-            credentials=_authorize_google_sheets(),
+            http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=45)),
             cache_discovery=False,
         )
 else:
     def _get_sheets_service():
+        credentials = _authorize_google_sheets()
         return build(
             "sheets",
             "v4",
-            credentials=_authorize_google_sheets(),
+            http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=45)),
             cache_discovery=False,
         )
 
