@@ -255,7 +255,6 @@ if st is not None:
             "sheets",
             "v4",
             credentials=_authorize_google_sheets(),
-            http=httplib2.Http(timeout=15),
             cache_discovery=False,
         )
 else:
@@ -264,7 +263,6 @@ else:
             "sheets",
             "v4",
             credentials=_authorize_google_sheets(),
-            http=httplib2.Http(timeout=15),
             cache_discovery=False,
         )
 
@@ -306,6 +304,10 @@ def _clear_main_sheet_cache():
     clear = getattr(_fetch_main_sheet_cached, "clear", None)
     if callable(clear):
         clear()
+    sample_lookup = globals().get("_fetch_sheet_header_and_samples")
+    sample_clear = getattr(sample_lookup, "clear", None)
+    if callable(sample_clear):
+        sample_clear()
 
 # ░░░ Estrutura do formulário (labels do formulário) ░░░
 FORM_SECTIONS: List[Tuple[str, List[Tuple[str, Any]]]] = [
@@ -529,16 +531,34 @@ def _coerce_sheet_value(label: str, value: Any) -> Any:
     return "" if value is None else str(value)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_sheet_header_and_samples() -> Tuple[List[str], List[str]]:
+    """Lê somente o cabeçalho e a coluna de etiquetas do cadastro."""
+    service = _get_sheets_service()
+    header_result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{SHEET_NAME}!A1:AJ1",
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute()
+    sample_result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{SHEET_NAME}!G:G",
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute()
+    header = (header_result.get("values") or [[]])[0]
+    samples = [str(row[0]).strip() if row else "" for row in sample_result.get("values", [])]
+    return list(header), samples
+
+
 def _fetch_sample_from_sheets(sample_number: str) -> Optional[Tuple[int, Dict[str, Any], int, Dict[str, str]]]:
     try:
-        rows = _fetch_main_sheet_cached()
+        header, samples = _fetch_sheet_header_and_samples()
     except HttpError as exc:
         raise RuntimeError(f"Erro ao consultar planilha: {exc}") from exc
 
-    if not rows:
+    if not header:
         return None
 
-    header = rows[0]
     header_map = {name: idx for idx, name in enumerate(header)}
     sample_col_idx = header_map.get("n.º da Amostra")
     if sample_col_idx is None:
@@ -548,16 +568,25 @@ def _fetch_sample_from_sheets(sample_number: str) -> Optional[Tuple[int, Dict[st
     if os_col_idx is None:
         os_col_idx = _column_letter_to_index(OS_TARGET_COL)
 
-    matches: List[Tuple[int, List[str]]] = []
-    for idx, row in enumerate(rows[1:], start=2):
-        cell_value = row[sample_col_idx] if sample_col_idx < len(row) else ""
-        if str(cell_value).strip() == sample_number:
-            matches.append((idx, row))
+    matches = [
+        row_number
+        for row_number, value in enumerate(samples, start=1)
+        if row_number > 1 and value == sample_number
+    ]
 
     if not matches:
         return None
 
-    row_idx, row_values = matches[-1]
+    row_idx = matches[-1]
+    try:
+        row_result = _get_sheets_service().spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!A{row_idx}:AJ{row_idx}",
+            valueRenderOption="FORMATTED_VALUE",
+        ).execute()
+    except HttpError as exc:
+        raise RuntimeError(f"Erro ao carregar a amostra: {exc}") from exc
+    row_values = (row_result.get("values") or [[]])[0]
     form_data: Dict[str, Any] = {}
     extras: Dict[str, str] = {}
     for sheet_header, form_label in SHEET_HEADER_TO_FORM.items():

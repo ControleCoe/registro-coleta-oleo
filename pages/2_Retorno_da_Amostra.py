@@ -484,7 +484,9 @@ def _next_return_block_row() -> int:
             .values()
             .get(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{RETURN_SHEET_NAME}!A:Z",
+                # A primeira coluna é preenchida em todos os blocos. Ler somente
+                # ela evita baixar a aba RETORNO inteira a cada processamento.
+                range=f"{RETURN_SHEET_NAME}!A:A",
                 valueRenderOption="FORMATTED_VALUE",
             )
             .execute()
@@ -537,6 +539,7 @@ def write_return_blocks_by_os(
 
     next_row = _next_return_block_row()
     created_rows: List[int] = []
+    updates = []
 
     for os_value, grouped_data in grouped_rows.items():
         block = _build_return_block(
@@ -546,30 +549,36 @@ def write_return_blocks_by_os(
             os_value,
         )
 
-        try:
-            (
-                _svc()
-                .spreadsheets()
-                .values()
-                .update(
-                    spreadsheetId=SPREADSHEET_ID,
-                    range=f"{RETURN_SHEET_NAME}!A{next_row}",
-                    valueInputOption="RAW",
-                    body={"values": block},
-                )
-                .execute()
-            )
-        except HttpError as exc:
-            raise RuntimeError(
-                f"Não foi possível gravar o bloco da OS {os_value} "
-                f"na aba {RETURN_SHEET_NAME}: {exc}"
-            ) from exc
+        updates.append(
+            {
+                "range": f"{RETURN_SHEET_NAME}!A{next_row}",
+                "values": block,
+            }
+        )
 
         created_rows.append(next_row)
 
         # Cada bloco ocupa duas linhas: cabeçalho e dados.
         # A próxima OS começa após uma linha vazia.
         next_row += len(block) + 1
+
+    # Todas as O.S. do retorno são enviadas em uma única comunicação com a
+    # planilha. Isso evita uma espera repetida para cada bloco.
+    try:
+        (
+            _svc()
+            .spreadsheets()
+            .values()
+            .batchUpdate(
+                spreadsheetId=SPREADSHEET_ID,
+                body={"valueInputOption": "RAW", "data": updates},
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        raise RuntimeError(
+            f"Não foi possível gravar os blocos na aba {RETURN_SHEET_NAME}: {exc}"
+        ) from exc
 
     return created_rows
 
@@ -708,51 +717,103 @@ def _validate_launcher_name(name: str) -> str:
     return ""
 
 
-def _sanitize_numeric_field(key: str, max_length: int) -> None:
-    raw_value = str(st.session_state.get(key, "") or "")
-    st.session_state[key] = "".join(
+def _sanitize_numeric_value(value: str, max_length: int) -> str:
+    """Limpa o valor sem alterar os widgets já exibidos pelo Streamlit."""
+    raw_value = str(value or "")
+    return "".join(
         character for character in raw_value if character.isdigit()
     )[:max_length]
 
 
+class SampleLookupNotFound(RuntimeError):
+    pass
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _lookup_column(column: str) -> List[str]:
+    """Carrega apenas uma coluna para localizar a amostra rapidamente."""
+    result = (
+        _svc().spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!{column}:{column}",
+            valueRenderOption="FORMATTED_VALUE",
+        ).execute()
+    )
+    return [str(row[0]).strip() if row else "" for row in result.get("values", [])]
+
+
 def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
-    try:
-        sheet = fetch_sheet()
-    except Exception as exc:
-        raise RuntimeError(f"Não foi possível consultar o Google Sheets: {exc}") from exc
-
-    if not sheet:
-        raise RuntimeError("A aba da planilha está vazia.")
-
-    _, *data = sheet
-    sample_idx = _col_to_idx(SAMPLE_COL)
-    os_idx = _col_to_idx(OS_COL)
-
+    """Localiza por O.S. ou amostra sem baixar a aba Geral inteira."""
     code = str(code or "").strip()
     os_value = str(os_value or "").strip()
+    lookup_column = OS_COL if os_value else SAMPLE_COL
+    lookup_value = os_value or code
 
-    for row in data:
-        row_code = str(row[sample_idx]).strip() if sample_idx < len(row) else ""
-        row_os = str(row[os_idx]).strip() if os_idx < len(row) else ""
-        row_locality = _resolve_locality(row, data)
-
-        if code and os_value:
-            if row_code == code and row_os == os_value:
-                return row_code, row_os, row_locality
-        elif code:
-            if row_code == code:
-                return row_code, row_os, row_locality
-        elif os_value:
-            if row_os == os_value:
-                return row_code, row_os, row_locality
-
-    if code and os_value:
-        raise RuntimeError(
-            "A combinação entre Código da amostra e Ordem de Serviço não foi encontrada."
+    try:
+        values = _lookup_column(lookup_column)
+        row_number = next(
+            (idx for idx, value in enumerate(values, start=1) if value == lookup_value),
+            None,
         )
-    if code:
-        raise RuntimeError("Código da amostra não encontrado.")
-    raise RuntimeError("Ordem de Serviço não encontrada.")
+        if row_number is None:
+            raise SampleLookupNotFound()
+        result = (
+            _svc().spreadsheets().values().get(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"{SHEET_NAME}!D{row_number}:AH{row_number}",
+                valueRenderOption="FORMATTED_VALUE",
+            ).execute()
+        )
+    except Exception:
+        raise
+    except Exception as exc:
+        raise RuntimeError("Não foi possível consultar a O.S. na planilha.") from exc
+
+    row = [""] * 3 + list((result.get("values") or [[]])[0])
+    found_code = _row_value(row, SAMPLE_COL)
+    found_os = _row_value(row, OS_COL)
+    found_locality = _normalize_locality(_row_value(row, LOCAL_OPERATION_COL))
+    if (code and found_code != code) or (os_value and found_os != os_value):
+        raise SampleLookupNotFound()
+    return found_code, found_os, found_locality
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _return_header() -> List[str]:
+    result = (
+        _svc().spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!A1:AJ1",
+            valueRenderOption="FORMATTED_VALUE",
+        ).execute()
+    )
+    return list((result.get("values") or [[]])[0])
+
+
+def _load_return_rows(codes: List[str]) -> tuple[List[str], List[int], List[List[str]]]:
+    """Carrega somente as linhas que serão processadas no retorno."""
+    header = _return_header()
+    samples = _lookup_column(SAMPLE_COL)
+    row_for_code = {}
+    requested = set(codes)
+    for row_number, value in enumerate(samples, start=1):
+        if row_number > 1 and value in requested:
+            row_for_code[value] = row_number
+
+    ordered = [(code, row_for_code[code]) for code in codes if code in row_for_code]
+    if not ordered:
+        return header, [], []
+
+    result = (
+        _svc().spreadsheets().values().batchGet(
+            spreadsheetId=SPREADSHEET_ID,
+            ranges=[f"{SHEET_NAME}!A{row}:AJ{row}" for _, row in ordered],
+            valueRenderOption="FORMATTED_VALUE",
+        ).execute()
+    )
+    value_ranges = result.get("valueRanges", [])
+    rows = [list((item.get("values") or [[]])[0]) for item in value_ranges]
+    return header, [row for _, row in ordered], rows
 
 
 def _os_already_processed(os_value: str) -> bool:
@@ -777,11 +838,12 @@ def _os_already_processed(os_value: str) -> bool:
 
 
 def add_item() -> None:
-    _sanitize_numeric_field("retorno_codigo", 9)
-    _sanitize_numeric_field("retorno_os", 6)
-
-    code = st.session_state.retorno_codigo.strip()
-    os_value = st.session_state.retorno_os.strip()
+    code = _sanitize_numeric_value(
+        st.session_state.get("retorno_codigo", ""), 9
+    )
+    os_value = _sanitize_numeric_value(
+        st.session_state.get("retorno_os", ""), 6
+    )
 
     if not code and not os_value:
         st.session_state.retorno_msg = (
@@ -803,17 +865,20 @@ def add_item() -> None:
 
     try:
         found_code, found_os, found_locality = _find_sample_and_os(code, os_value)
-    except Exception:
+    except SampleLookupNotFound:
         # Quando código e O.S. ainda não estiverem no Geral, aceita o lançamento.
         # Eles serão incluídos na planilha ao confirmar o retorno.
-        if not (code and os_value):
+        if not code:
             st.session_state.retorno_msg = (
-                "Informe o Código da amostra e a Ordem de Serviço para cadastrar uma nova amostra."
+                f"A O.S. {os_value} não foi encontrada na planilha."
             )
             return
         found_code = code
         found_os = os_value
         found_locality = st.session_state.get("localidade_acesso", "")
+    except Exception as exc:
+        st.session_state.retorno_msg = str(exc)
+        return
 
     found_locality = _normalize_locality(found_locality)
     access_locality = _normalize_locality(
@@ -871,8 +936,9 @@ def add_item() -> None:
     st.session_state.retorno_localidades[found_code] = (
         _normalize_locality(found_locality) or "LOCALIDADE NÃO INFORMADA"
     )
-    st.session_state.retorno_codigo = ""
-    st.session_state.retorno_os = ""
+    # Os campos já foram exibidos nesta execução. A limpeza acontece no
+    # próximo rerun, antes dos widgets serem criados novamente.
+    st.session_state.retorno_limpar_campos = True
     st.session_state.retorno_msg = ""
 
 
@@ -885,27 +951,21 @@ if access_locality:
         "Somente amostras e O.S. desta localidade serão aceitas."
     )
 
-with st.container(border=True):
-    c1, c2 = st.columns(2)
-    with c1:
-        st.text_input(
-            "Código da amostra",
-            key="retorno_codigo",
-            max_chars=9,
-            placeholder="9 números",
-            on_change=_sanitize_numeric_field,
-            args=("retorno_codigo", 9),
-        )
-    with c2:
-        st.text_input(
-            "Ordem de Serviço",
-            key="retorno_os",
-            max_chars=6,
-            placeholder="6 números",
-            on_change=_sanitize_numeric_field,
-            args=("retorno_os", 6),
-        )
-    st.button("➕ Adicionar amostra", on_click=add_item, use_container_width=True)
+with st.form("adicionar_amostra", border=True, enter_to_submit=True):
+    st.text_input(
+        "Ordem de Serviço",
+        key="retorno_os",
+        max_chars=6,
+        placeholder="6 números",
+        help="Informe somente a O.S. para adicionar a amostra vinculada.",
+    )
+    adicionar_amostra = st.form_submit_button(
+        "➕ Adicionar amostra",
+        use_container_width=True,
+    )
+
+if adicionar_amostra:
+    add_item()
 
 if st.session_state.retorno_msg:
     st.warning(st.session_state.retorno_msg)
@@ -1035,32 +1095,30 @@ if generate:
 
     with pacman_loader("Consultando a planilha..."):
         try:
-            sheet = fetch_sheet()
+            all_codes = list(st.session_state.retorno_lista.keys())
+            header, rows_idx, rows_data = _load_return_rows(all_codes)
         except Exception as exc:
             st.session_state.retorno_ultimo_fingerprint = ""
             st.session_state.retorno_ultimo_processamento_em = 0.0
             st.error(f"Não foi possível consultar o Google Sheets: {exc}")
             st.stop()
 
-        if not sheet:
+        if not header:
             st.error("A aba da planilha está vazia.")
             st.stop()
 
-        header, *data = sheet
         sample_idx = _col_to_idx(SAMPLE_COL)
-        os_idx = _col_to_idx(OS_COL)
-        rows_idx, os_vals, rows_data = [], [], []
-        found = set()
-
-        for row_number, row in enumerate(data, start=2):
-            code = str(row[sample_idx]).strip() if sample_idx < len(row) else ""
-            if code in st.session_state.retorno_lista:
-                rows_idx.append(row_number)
-                os_vals.append(st.session_state.retorno_lista[code])
-                rows_data.append(list(row))
-                found.add(code)
-
-        all_codes = list(st.session_state.retorno_lista.keys())
+        os_vals = [
+            st.session_state.retorno_lista.get(
+                str(row[sample_idx]).strip() if sample_idx < len(row) else "", ""
+            )
+            for row in rows_data
+        ]
+        found = {
+            str(row[sample_idx]).strip()
+            for row in rows_data
+            if sample_idx < len(row)
+        }
         missing = [code for code in all_codes if code not in found]
         today = datetime.now(ZoneInfo("America/Manaus")).strftime(DATE_FMT)
         all_rows_data = list(rows_data)
