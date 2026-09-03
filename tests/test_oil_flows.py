@@ -161,6 +161,16 @@ def test_return_can_find_collection_saved_after_previous_lookup(sheets):
     assert app.session_state["retorno_lista"] == {"987654321": "654321"}
 
 
+def test_return_adds_os_without_showing_an_empty_input_warning(sheets):
+    app = AppTest.from_file(str(ROOT / "pages/2_Retorno_da_Amostra.py"), default_timeout=20)
+    app.run()
+    app.text_input(key="retorno_os").set_value("123456")
+    click(app, "➕ Adicionar amostra")
+
+    assert app.session_state["retorno_lista"] == {"123456789": "123456"}
+    assert not app.warning
+
+
 def test_return_does_not_write_an_os_that_already_has_a_return(sheets):
     """A second confirmation must not create duplicate return blocks."""
     status_idx = 31  # AF

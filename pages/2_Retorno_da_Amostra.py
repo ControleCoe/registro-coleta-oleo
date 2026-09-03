@@ -942,13 +942,8 @@ with st.form("adicionar_amostra", border=True, enter_to_submit=True):
     adicionar_amostra = st.form_submit_button(
         "➕ Adicionar amostra",
         use_container_width=True,
+        on_click=add_item,
     )
-
-if adicionar_amostra:
-    # A primeira consulta pode precisar carregar o índice de O.S. do Google
-    # Sheets. O indicador evita um segundo clique enquanto ela termina.
-    with st.spinner("Buscando a O.S. na planilha..."):
-        add_item()
 
 if st.session_state.retorno_msg:
     st.warning(st.session_state.retorno_msg)
