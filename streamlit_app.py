@@ -573,7 +573,7 @@ if modulo == "inicio":
         """, unsafe_allow_html=True)
         st.button("Acessar Retorno da Amostra", on_click=abrir_modulo, args=("retorno",), use_container_width=True, key="abrir_retorno")
 
-    st.markdown('<div class="footer">Oliveira Energia · Controle de Amostras de Óleo · Versão 2.6.1</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer">Oliveira Energia · Controle de Amostras de Óleo · Versão 2.6.2</div>', unsafe_allow_html=True)
 
 else:
     c1,_=st.columns([1,4])
