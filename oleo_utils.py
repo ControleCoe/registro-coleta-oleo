@@ -308,6 +308,10 @@ def _clear_main_sheet_cache():
     sample_clear = getattr(sample_lookup, "clear", None)
     if callable(sample_clear):
         sample_clear()
+    column_lookup = globals().get("_fetch_sheet_column")
+    column_clear = getattr(column_lookup, "clear", None)
+    if callable(column_clear):
+        column_clear()
 
 # ░░░ Estrutura do formulário (labels do formulário) ░░░
 FORM_SECTIONS: List[Tuple[str, List[Tuple[str, Any]]]] = [
@@ -535,19 +539,28 @@ def _coerce_sheet_value(label: str, value: Any) -> Any:
 def _fetch_sheet_header_and_samples() -> Tuple[List[str], List[str]]:
     """Lê somente o cabeçalho e a coluna de etiquetas do cadastro."""
     service = _get_sheets_service()
-    header_result = service.spreadsheets().values().get(
+    result = service.spreadsheets().values().batchGet(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"{SHEET_NAME}!A1:AJ1",
+        ranges=[f"{SHEET_NAME}!A1:AJ1", f"{SHEET_NAME}!G:G"],
         valueRenderOption="FORMATTED_VALUE",
     ).execute()
-    sample_result = service.spreadsheets().values().get(
-        spreadsheetId=SPREADSHEET_ID,
-        range=f"{SHEET_NAME}!G:G",
-        valueRenderOption="FORMATTED_VALUE",
-    ).execute()
+    header_result, sample_result = result["valueRanges"]
     header = (header_result.get("values") or [[]])[0]
     samples = [str(row[0]).strip() if row else "" for row in sample_result.get("values", [])]
     return list(header), samples
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _fetch_sheet_column(column: str) -> List[str]:
+    """Índice compartilhado, invalidado tanto pelo cadastro quanto pelo retorno."""
+    if column == "G":
+        return _fetch_sheet_header_and_samples()[1]
+    result = _get_sheets_service().spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{SHEET_NAME}!{column}:{column}",
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute()
+    return [str(row[0]).strip() if row else "" for row in result.get("values", [])]
 
 
 def _fetch_sample_from_sheets(sample_number: str) -> Optional[Tuple[int, Dict[str, Any], int, Dict[str, str]]]:
@@ -2003,4 +2016,3 @@ def generate_pdf(responses: Dict[str, Any]) -> bytes:
 if __name__ == "__main__":
     if st is None:
         raise SystemExit("Execute via `streamlit run streamlit_app.py`.")
-
