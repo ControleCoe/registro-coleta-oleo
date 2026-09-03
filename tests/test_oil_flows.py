@@ -161,6 +161,23 @@ def test_return_can_find_collection_saved_after_previous_lookup(sheets):
     assert app.session_state["retorno_lista"] == {"987654321": "654321"}
 
 
+def test_return_does_not_write_an_os_that_already_has_a_return(sheets):
+    """A second confirmation must not create duplicate return blocks."""
+    status_idx = 31  # AF
+    sheets.row[status_idx] = "RETORNO"
+    app = AppTest.from_file(str(ROOT / "pages/2_Retorno_da_Amostra.py"), default_timeout=20)
+    app.session_state["retorno_lista"] = {"123456789": "123456"}
+    app.session_state["retorno_localidades"] = {"123456789": "CANUTAMA"}
+
+    app.run()
+    click(app, "📥 Processar retorno")
+    app.text_input(key="retorno_lancador").set_value("CAROL PASSOS")
+    click(app, "✅ Confirmar lançamento")
+
+    assert app.warning
+    assert not sheets.writes
+
+
 @pytest.mark.parametrize("code", ["123456789", "987654321"])
 def test_invalid_word_template_does_not_write_return_or_debit_kits(sheets, code):
     app = AppTest.from_file(str(ROOT / "pages/2_Retorno_da_Amostra.py"), default_timeout=20)

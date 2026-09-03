@@ -945,7 +945,10 @@ with st.form("adicionar_amostra", border=True, enter_to_submit=True):
     )
 
 if adicionar_amostra:
-    add_item()
+    # A primeira consulta pode precisar carregar o índice de O.S. do Google
+    # Sheets. O indicador evita um segundo clique enquanto ela termina.
+    with st.spinner("Buscando a O.S. na planilha..."):
+        add_item()
 
 if st.session_state.retorno_msg:
     st.warning(st.session_state.retorno_msg)
@@ -1116,6 +1119,28 @@ if generate:
             all_os_vals.extend(new_os_vals)
 
         if not all_rows_data:
+            st.stop()
+
+        # Uma confirmação posterior da mesma O.S. criaria outro bloco na aba
+        # RETORNO. A verificação usa as linhas que já foram carregadas, sem
+        # fazer uma nova consulta completa à planilha.
+        status_idx = _col_to_idx(STATUS_COL)
+        processed_os = sorted(
+            {
+                os_value
+                for row, os_value in zip(rows_data, os_vals)
+                if status_idx < len(row)
+                and str(row[status_idx]).strip().upper().startswith("RETORNO")
+            }
+        )
+        if processed_os:
+            st.session_state.retorno_ultimo_fingerprint = ""
+            st.session_state.retorno_ultimo_processamento_em = 0.0
+            st.warning(
+                "A O.S. "
+                + ", ".join(processed_os)
+                + " já possui retorno registrado. Nenhuma gravação foi feita."
+            )
             st.stop()
 
     status_idx = _col_to_idx(STATUS_COL)
