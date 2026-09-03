@@ -35,10 +35,12 @@ if "pdf_pending_responses" not in st.session_state:
     st.session_state["pdf_pending_responses"] = None
 
 
+# A confirmação da gravação não depende de o PDF já ter sido gerado.
+if st.session_state["pdf_ready_message"]:
+    st.success(st.session_state["pdf_ready_message"])
+
 # Mantém o PDF disponível mesmo depois de limpar o formulário.
 if st.session_state["pdf_bytes"]:
-    if st.session_state["pdf_ready_message"]:
-        st.success(st.session_state["pdf_ready_message"])
     st.download_button(
         label="⬇️ Baixar PDF",
         data=st.session_state["pdf_bytes"],
@@ -120,6 +122,7 @@ if st.button("✅ Salvar coleta"):
                 st.error(str(exc))
                 st.stop()
         st.session_state["pdf_pending_responses"] = dict(responses)
+        st.session_state["pdf_bytes"] = None
 
         # A gravação terminou com sucesso. O PDF pode ser gerado depois, sem atrasar o salvamento.
         st.session_state["pdf_ready_message"] = (

@@ -24,6 +24,8 @@ from oleo_utils import (
     _get_sheets_service,
     _fetch_main_sheet_cached,
     _clear_main_sheet_cache,
+    _fetch_sheet_column,
+    _fetch_sheet_header_and_samples,
 )
 from loader_utils import pacman_loader
 
@@ -609,28 +611,15 @@ def update_rows(rows_idx: List[int], today: str, os_vals: List[str]) -> None:
         st.stop()
 
 
-def append_missing_samples(
+def _build_missing_sample_rows(
     codes: List[str],
     today: str,
     header: List[str],
 ) -> tuple[List[List[str]], List[str]]:
-    """Inclui no Geral as amostras digitadas que ainda não existem."""
+    """Prepara as amostras novas sem gravar antes de validar os documentos."""
     sample_idx = _col_to_idx(SAMPLE_COL)
     os_idx = _col_to_idx(OS_COL)
     locality_idx = _col_to_idx(LOCAL_OPERATION_COL)
-    # A baixa só acontece depois de o retorno ser gravado com sucesso.
-    # Cada amostra retornada consome um KIT da localidade que está logada.
-    kit_localidade = str(
-        st.session_state.get("localidade_acesso", "") or ""
-    ).strip().upper()
-    try:
-        baixar_kit_contrato_por_retorno(kit_localidade, len(all_rows_data))
-    except Exception as exc:
-        st.warning(
-            "O retorno foi registrado, mas não foi possível atualizar o saldo "
-            f"do KIT CONTRATO agora: {exc}"
-        )
-
     status_idx = _col_to_idx(STATUS_COL)
     date_idx = _col_to_idx(DATE_COL)
     width = max(len(header), sample_idx + 1, os_idx + 1, locality_idx + 1, status_idx + 1, date_idx + 1)
@@ -646,6 +635,14 @@ def append_missing_samples(
         row[date_idx] = today
         rows.append(row)
         os_values.append(row[os_idx])
+
+    return rows, os_values
+
+
+def append_missing_samples(
+    codes: List[str], today: str, header: List[str],
+) -> tuple[List[List[str]], List[str]]:
+    rows, os_values = _build_missing_sample_rows(codes, today, header)
 
     try:
         _svc().spreadsheets().values().append(
@@ -729,17 +726,8 @@ class SampleLookupNotFound(RuntimeError):
     pass
 
 
-@st.cache_data(ttl=120, show_spinner=False)
 def _lookup_column(column: str) -> List[str]:
-    """Carrega apenas uma coluna para localizar a amostra rapidamente."""
-    result = (
-        _svc().spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!{column}:{column}",
-            valueRenderOption="FORMATTED_VALUE",
-        ).execute()
-    )
-    return [str(row[0]).strip() if row else "" for row in result.get("values", [])]
+    return _fetch_sheet_column(column)
 
 
 def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
@@ -764,7 +752,7 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
                 valueRenderOption="FORMATTED_VALUE",
             ).execute()
         )
-    except Exception:
+    except SampleLookupNotFound:
         raise
     except Exception as exc:
         raise RuntimeError("Não foi possível consultar a O.S. na planilha.") from exc
@@ -778,16 +766,8 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
     return found_code, found_os, found_locality
 
 
-@st.cache_data(ttl=300, show_spinner=False)
 def _return_header() -> List[str]:
-    result = (
-        _svc().spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"{SHEET_NAME}!A1:AJ1",
-            valueRenderOption="FORMATTED_VALUE",
-        ).execute()
-    )
-    return list((result.get("values") or [[]])[0])
+    return _fetch_sheet_header_and_samples()[0]
 
 
 def _load_return_rows(codes: List[str]) -> tuple[List[str], List[int], List[List[str]]]:
@@ -1126,7 +1106,7 @@ if generate:
 
         if missing:
             try:
-                new_rows, new_os_vals = append_missing_samples(missing, today, header)
+                new_rows, new_os_vals = _build_missing_sample_rows(missing, today, header)
             except Exception as exc:
                 st.session_state.retorno_ultimo_fingerprint = ""
                 st.session_state.retorno_ultimo_processamento_em = 0.0
@@ -1134,37 +1114,13 @@ if generate:
                 st.stop()
             all_rows_data.extend(new_rows)
             all_os_vals.extend(new_os_vals)
-            st.info(
-                "Amostras não encontradas foram adicionadas normalmente à planilha: "
-                + ", ".join(missing)
-            )
 
         if not all_rows_data:
             st.stop()
 
-    with pacman_loader("Gravando o retorno no Google Sheets..."):
-        if rows_idx:
-            update_rows(rows_idx, today, os_vals)
-
-    with pacman_loader("Criando os blocos na aba RETORNO..."):
-        try:
-            return_block_rows = write_return_blocks_by_os(
-                all_rows_data,
-                today,
-                all_os_vals,
-                launcher_name,
-            )
-        except Exception as exc:
-            st.session_state.retorno_ultimo_fingerprint = ""
-            st.session_state.retorno_ultimo_processamento_em = 0.0
-            st.error(
-                "Não foi possível criar os blocos na aba RETORNO. "
-                f"Detalhe: {exc}"
-            )
-            st.stop()
-
     status_idx = _col_to_idx(STATUS_COL)
     date_idx = _col_to_idx(DATE_COL)
+    os_idx = _col_to_idx(OS_COL)
     required_width = max(len(header), status_idx + 1, date_idx + 1, os_idx + 1)
     export_header = list(header) + [""] * (required_width - len(header))
 
@@ -1232,6 +1188,44 @@ if generate:
             st.error(f"Não foi possível gerar o documento Word: {exc}")
             st.stop()
 
+    with pacman_loader("Gravando o retorno no Google Sheets..."):
+        if missing:
+            try:
+                append_missing_samples(missing, today, header)
+            except Exception as exc:
+                st.session_state.retorno_ultimo_fingerprint = ""
+                st.session_state.retorno_ultimo_processamento_em = 0.0
+                st.error(str(exc))
+                st.stop()
+        if rows_idx:
+            update_rows(rows_idx, today, os_vals)
+
+    with pacman_loader("Criando os blocos na aba RETORNO..."):
+        try:
+            return_block_rows = write_return_blocks_by_os(
+                all_rows_data,
+                today,
+                all_os_vals,
+                launcher_name,
+            )
+        except Exception as exc:
+            st.session_state.retorno_ultimo_fingerprint = ""
+            st.session_state.retorno_ultimo_processamento_em = 0.0
+            st.error(
+                "Não foi possível criar os blocos na aba RETORNO. "
+                f"Detalhe: {exc}"
+            )
+            st.stop()
+
+    # Só baixa o kit após gravar o retorno em Geral e RETORNO.
+    try:
+        baixar_kit_contrato_por_retorno(locality, len(all_rows_data))
+    except Exception as exc:
+        st.warning(
+            "O retorno foi registrado, mas não foi possível atualizar o saldo "
+            f"do KIT CONTRATO agora: {exc}"
+        )
+
     first_row = return_block_rows[0] if return_block_rows else 0
     message = (
         f"✔️ {len(df_ok)} amostra(s) processada(s) e exportada(s). "
@@ -1263,12 +1257,18 @@ if generate:
             word_buffer.getvalue(),
         )
     all_files_buffer.seek(0)
+    st.session_state["retorno_arquivo"] = all_files_buffer.getvalue()
+    st.session_state["retorno_arquivo_nome"] = f"{safe_identification}.zip"
+    st.session_state["retorno_sucesso"] = message
 
+if st.session_state.get("retorno_arquivo"):
+    if not generate:
+        st.success(st.session_state["retorno_sucesso"])
     st.download_button(
         "⬇️ Baixar todos",
-        data=all_files_buffer,
-        file_name=f"{safe_identification}.zip",
+        data=st.session_state["retorno_arquivo"],
+        file_name=st.session_state["retorno_arquivo_nome"],
         mime="application/zip",
         use_container_width=True,
+        on_click="ignore",
     )
-
