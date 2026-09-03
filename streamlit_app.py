@@ -456,9 +456,9 @@ div[data-testid="stDateInput"] label{
 """, unsafe_allow_html=True)
 
 localidade_atual = normalizar_localidade(st.session_state.get("localidade_acesso", ""))
-localidade_exibida = html.escape(localidade_atual or "NÃO INFORMADA")
-localidade_atual = str(st.session_state.get("localidade_acesso", "") or "").strip().upper()
-localidade_exibida = html.escape(localidade_atual or "NÃO INFORMADA")
+localidade_exibida = html.escape(
+    f"UTE - {localidade_atual}" if localidade_atual else "NÃO INFORMADA"
+)
 st.markdown(
     f"""
     <div class="access-toolbar">
