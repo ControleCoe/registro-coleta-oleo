@@ -933,6 +933,13 @@ if access_locality:
 
 with st.form("adicionar_amostra", border=True, enter_to_submit=True):
     st.text_input(
+        "Código da amostra",
+        key="retorno_codigo",
+        max_chars=9,
+        placeholder="9 números",
+        help="Informe o código da amostra ou a O.S. para adicionar a amostra.",
+    )
+    st.text_input(
         "Ordem de Serviço",
         key="retorno_os",
         max_chars=6,

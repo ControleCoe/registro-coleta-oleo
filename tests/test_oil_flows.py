@@ -170,6 +170,15 @@ def test_return_adds_os_without_showing_an_empty_input_warning(sheets):
     assert not app.warning
 
 
+def test_return_accepts_the_sample_code_entered_by_the_operator(sheets):
+    app = AppTest.from_file(str(ROOT / "pages/2_Retorno_da_Amostra.py"), default_timeout=20)
+    app.run()
+    app.text_input(key="retorno_codigo").set_value("123456789")
+    click(app, "➕ Adicionar amostra")
+
+    assert app.session_state["retorno_lista"] == {"123456789": "123456"}
+
+
 def test_return_does_not_write_an_os_that_already_has_a_return(sheets):
     """A second confirmation must not create duplicate return blocks."""
     status_idx = 31  # AF
