@@ -105,6 +105,17 @@ def click(app, label):
     assert not app.exception
 
 
+def seed_return_item(app, sheets, code):
+    row = list(sheets.row)
+    row[6] = code
+    row[33] = "123456"
+    app.session_state["retorno_lista"] = {code: "123456"}
+    app.session_state["retorno_localidades"] = {code: "CANUTAMA"}
+    app.session_state["retorno_linhas"] = {code: row}
+    app.session_state["retorno_linhas_idx"] = {code: 2}
+    app.session_state["retorno_cabecalho"] = list(sheets.header)
+
+
 def test_collection_save_confirms_success_after_reset(sheets):
     app = AppTest.from_file(str(ROOT / "pages/1_Registro_de_Coleta.py"), default_timeout=20)
     app.run()
@@ -126,8 +137,7 @@ def test_collection_save_confirms_success_after_reset(sheets):
 @pytest.mark.parametrize("code", ["123456789", "987654321"])
 def test_return_produces_download_and_keeps_it_after_rerun(sheets, code):
     app = AppTest.from_file(str(ROOT / "pages/2_Retorno_da_Amostra.py"), default_timeout=20)
-    app.session_state["retorno_lista"] = {code: "123456"}
-    app.session_state["retorno_localidades"] = {code: "CANUTAMA"}
+    seed_return_item(app, sheets, code)
     kit_moves = []
 
     def kit_response(req, **kwargs):
@@ -183,6 +193,7 @@ def test_return_adds_os_without_showing_an_empty_input_warning(sheets):
     click(app, "➕ Adicionar amostra")
 
     assert app.session_state["retorno_lista"] == {"123456789": "123456"}
+    assert app.session_state["retorno_linhas"]["123456789"][6] == "123456789"
     assert not app.warning
 
 
@@ -200,8 +211,7 @@ def test_return_does_not_write_an_os_that_already_has_a_return(sheets):
     status_idx = 31  # AF
     sheets.row[status_idx] = "RETORNO"
     app = AppTest.from_file(str(ROOT / "pages/2_Retorno_da_Amostra.py"), default_timeout=20)
-    app.session_state["retorno_lista"] = {"123456789": "123456"}
-    app.session_state["retorno_localidades"] = {"123456789": "CANUTAMA"}
+    seed_return_item(app, sheets, "123456789")
 
     app.run()
     click(app, "📥 Processar retorno")
@@ -214,8 +224,7 @@ def test_return_does_not_write_an_os_that_already_has_a_return(sheets):
 @pytest.mark.parametrize("code", ["123456789", "987654321"])
 def test_return_does_not_depend_on_the_word_template(sheets, code):
     app = AppTest.from_file(str(ROOT / "pages/2_Retorno_da_Amostra.py"), default_timeout=20)
-    app.session_state["retorno_lista"] = {code: "123456"}
-    app.session_state["retorno_localidades"] = {code: "CANUTAMA"}
+    seed_return_item(app, sheets, code)
     with patch("lxml.etree.fromstring", side_effect=ValueError("Invalid template")):
         with patch("urllib.request.urlopen", return_value=io.BytesIO(b'{"ok":true}')) as stock:
             app.run()

@@ -661,6 +661,9 @@ def append_missing_samples(
 
 st.session_state.setdefault("retorno_lista", {})
 st.session_state.setdefault("retorno_localidades", {})
+st.session_state.setdefault("retorno_linhas", {})
+st.session_state.setdefault("retorno_linhas_idx", {})
+st.session_state.setdefault("retorno_cabecalho", [])
 st.session_state.setdefault("retorno_codigo", "")
 st.session_state.setdefault("retorno_os", "")
 st.session_state.setdefault("retorno_msg", "")
@@ -730,7 +733,7 @@ def _lookup_column(column: str) -> List[str]:
     return _fetch_sheet_column(column)
 
 
-def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
+def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str, int, List[str]]:
     """Localiza por O.S. ou amostra sem baixar a aba Geral inteira."""
     code = str(code or "").strip()
     os_value = str(os_value or "").strip()
@@ -748,7 +751,7 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
         result = (
             _svc().spreadsheets().values().get(
                 spreadsheetId=SPREADSHEET_ID,
-                range=f"{SHEET_NAME}!D{row_number}:AH{row_number}",
+                range=f"{SHEET_NAME}!A{row_number}:AJ{row_number}",
                 valueRenderOption="FORMATTED_VALUE",
             ).execute()
         )
@@ -757,17 +760,24 @@ def _find_sample_and_os(code: str, os_value: str) -> tuple[str, str, str]:
     except Exception as exc:
         raise RuntimeError("Não foi possível consultar a O.S. na planilha.") from exc
 
-    row = [""] * 3 + list((result.get("values") or [[]])[0])
+    row = list((result.get("values") or [[]])[0])
     found_code = _row_value(row, SAMPLE_COL)
     found_os = _row_value(row, OS_COL)
     found_locality = _normalize_locality(_row_value(row, LOCAL_OPERATION_COL))
     if (code and found_code != code) or (os_value and found_os != os_value):
         raise SampleLookupNotFound()
-    return found_code, found_os, found_locality
+    return found_code, found_os, found_locality, row_number, row
 
 
 def _return_header() -> List[str]:
-    return _fetch_sheet_header_and_samples()[0]
+    result = (
+        _svc().spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!A1:AJ1",
+            valueRenderOption="FORMATTED_VALUE",
+        ).execute()
+    )
+    return list((result.get("values") or [[]])[0])
 
 
 def _load_return_rows(codes: List[str]) -> tuple[List[str], List[int], List[List[str]]]:
@@ -844,7 +854,7 @@ def add_item() -> None:
         return
 
     try:
-        found_code, found_os, found_locality = _find_sample_and_os(code, os_value)
+        found_code, found_os, found_locality, found_row_number, found_row = _find_sample_and_os(code, os_value)
     except SampleLookupNotFound:
         # Quando código e O.S. ainda não estiverem no Geral, aceita o lançamento.
         # Eles serão incluídos na planilha ao confirmar o retorno.
@@ -856,6 +866,8 @@ def add_item() -> None:
         found_code = code
         found_os = os_value
         found_locality = st.session_state.get("localidade_acesso", "")
+        found_row_number = 0
+        found_row = []
     except Exception as exc:
         st.session_state.retorno_msg = str(exc)
         return
@@ -916,6 +928,11 @@ def add_item() -> None:
     st.session_state.retorno_localidades[found_code] = (
         _normalize_locality(found_locality) or "LOCALIDADE NÃO INFORMADA"
     )
+    if found_row:
+        st.session_state.retorno_linhas[found_code] = found_row
+        st.session_state.retorno_linhas_idx[found_code] = found_row_number
+    if not st.session_state.retorno_cabecalho:
+        st.session_state.retorno_cabecalho = _return_header()
     # Os campos já foram exibidos nesta execução. A limpeza acontece no
     # próximo rerun, antes dos widgets serem criados novamente.
     st.session_state.retorno_limpar_campos = True
@@ -971,6 +988,8 @@ if st.session_state.retorno_lista:
         if c4.button("Remover", key=f"retorno_rm_{code}"):
             st.session_state.retorno_lista.pop(code, None)
             st.session_state.retorno_localidades.pop(code, None)
+            st.session_state.retorno_linhas.pop(code, None)
+            st.session_state.retorno_linhas_idx.pop(code, None)
             st.rerun()
 else:
     st.info("Nenhuma amostra adicionada.")
@@ -980,6 +999,9 @@ with col_clear:
     if st.button("🗑️ Limpar lista", use_container_width=True):
         st.session_state.retorno_lista.clear()
         st.session_state.retorno_localidades.clear()
+        st.session_state.retorno_linhas.clear()
+        st.session_state.retorno_linhas_idx.clear()
+        st.session_state.retorno_cabecalho = []
         st.session_state.retorno_msg = ""
         st.rerun()
 with col_generate:
@@ -1078,72 +1100,76 @@ if generate:
     st.session_state.retorno_ultimo_fingerprint = current_fingerprint
     st.session_state.retorno_ultimo_processamento_em = current_time
 
-    with pacman_loader("Consultando a planilha..."):
+    # Os dados foram consultados e guardados ao adicionar cada amostra. A
+    # confirmação não refaz a leitura da planilha, evitando a espera duplicada.
+    all_codes = list(st.session_state.retorno_lista.keys())
+    header = list(st.session_state.retorno_cabecalho)
+    rows_idx = [
+        st.session_state.retorno_linhas_idx[code]
+        for code in all_codes
+        if code in st.session_state.retorno_linhas_idx
+    ]
+    rows_data = [
+        list(st.session_state.retorno_linhas[code])
+        for code in all_codes
+        if code in st.session_state.retorno_linhas
+    ]
+    if not header:
+        st.error("Não há dados carregados para gerar o retorno. Adicione a amostra novamente.")
+        st.stop()
+
+    sample_idx = _col_to_idx(SAMPLE_COL)
+    os_vals = [
+        st.session_state.retorno_lista.get(
+            str(row[sample_idx]).strip() if sample_idx < len(row) else "", ""
+        )
+        for row in rows_data
+    ]
+    found = {
+        str(row[sample_idx]).strip()
+        for row in rows_data
+        if sample_idx < len(row)
+    }
+    missing = [code for code in all_codes if code not in found]
+    today = datetime.now(ZoneInfo("America/Manaus")).strftime(DATE_FMT)
+    all_rows_data = list(rows_data)
+    all_os_vals = list(os_vals)
+
+    if missing:
         try:
-            all_codes = list(st.session_state.retorno_lista.keys())
-            header, rows_idx, rows_data = _load_return_rows(all_codes)
+            new_rows, new_os_vals = _build_missing_sample_rows(missing, today, header)
         except Exception as exc:
             st.session_state.retorno_ultimo_fingerprint = ""
             st.session_state.retorno_ultimo_processamento_em = 0.0
-            st.error(f"Não foi possível consultar o Google Sheets: {exc}")
+            st.error(str(exc))
             st.stop()
+        all_rows_data.extend(new_rows)
+        all_os_vals.extend(new_os_vals)
 
-        if not header:
-            st.error("A aba da planilha está vazia.")
-            st.stop()
+    if not all_rows_data:
+        st.stop()
 
-        sample_idx = _col_to_idx(SAMPLE_COL)
-        os_vals = [
-            st.session_state.retorno_lista.get(
-                str(row[sample_idx]).strip() if sample_idx < len(row) else "", ""
-            )
-            for row in rows_data
-        ]
-        found = {
-            str(row[sample_idx]).strip()
-            for row in rows_data
-            if sample_idx < len(row)
+    # Uma confirmação posterior da mesma O.S. criaria outro bloco na aba
+    # RETORNO. A verificação usa as linhas que já foram carregadas, sem
+    # fazer uma nova consulta completa à planilha.
+    status_idx = _col_to_idx(STATUS_COL)
+    processed_os = sorted(
+        {
+            os_value
+            for row, os_value in zip(rows_data, os_vals)
+            if status_idx < len(row)
+            and str(row[status_idx]).strip().upper().startswith("RETORNO")
         }
-        missing = [code for code in all_codes if code not in found]
-        today = datetime.now(ZoneInfo("America/Manaus")).strftime(DATE_FMT)
-        all_rows_data = list(rows_data)
-        all_os_vals = list(os_vals)
-
-        if missing:
-            try:
-                new_rows, new_os_vals = _build_missing_sample_rows(missing, today, header)
-            except Exception as exc:
-                st.session_state.retorno_ultimo_fingerprint = ""
-                st.session_state.retorno_ultimo_processamento_em = 0.0
-                st.error(str(exc))
-                st.stop()
-            all_rows_data.extend(new_rows)
-            all_os_vals.extend(new_os_vals)
-
-        if not all_rows_data:
-            st.stop()
-
-        # Uma confirmação posterior da mesma O.S. criaria outro bloco na aba
-        # RETORNO. A verificação usa as linhas que já foram carregadas, sem
-        # fazer uma nova consulta completa à planilha.
-        status_idx = _col_to_idx(STATUS_COL)
-        processed_os = sorted(
-            {
-                os_value
-                for row, os_value in zip(rows_data, os_vals)
-                if status_idx < len(row)
-                and str(row[status_idx]).strip().upper().startswith("RETORNO")
-            }
+    )
+    if processed_os:
+        st.session_state.retorno_ultimo_fingerprint = ""
+        st.session_state.retorno_ultimo_processamento_em = 0.0
+        st.warning(
+            "A O.S. "
+            + ", ".join(processed_os)
+            + " já possui retorno registrado. Nenhuma gravação foi feita."
         )
-        if processed_os:
-            st.session_state.retorno_ultimo_fingerprint = ""
-            st.session_state.retorno_ultimo_processamento_em = 0.0
-            st.warning(
-                "A O.S. "
-                + ", ".join(processed_os)
-                + " já possui retorno registrado. Nenhuma gravação foi feita."
-            )
-            st.stop()
+        st.stop()
     status_idx = _col_to_idx(STATUS_COL)
     date_idx = _col_to_idx(DATE_COL)
     os_idx = _col_to_idx(OS_COL)
@@ -1253,6 +1279,9 @@ if generate:
     # Os campos são limpos no próximo rerun, antes de os widgets serem criados.
     st.session_state.retorno_lista.clear()
     st.session_state.retorno_localidades.clear()
+    st.session_state.retorno_linhas.clear()
+    st.session_state.retorno_linhas_idx.clear()
+    st.session_state.retorno_cabecalho = []
     st.session_state.retorno_msg = ""
     st.session_state.retorno_limpar_campos = True
     st.session_state.retorno_confirmacao_aberta = False
