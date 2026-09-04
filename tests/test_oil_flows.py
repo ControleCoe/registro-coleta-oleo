@@ -129,10 +129,9 @@ def test_return_produces_download_and_keeps_it_after_rerun(sheets, code):
         assert kit_moves[0]["quantity"] == 1
         assert kit_moves[0]["responsible"] == "CANUTAMA"
         with ZipFile(io.BytesIO(app.session_state["retorno_arquivo"])) as archive:
-            assert sorted(Path(name).suffix for name in archive.namelist()) == [".docx", ".xlsx"]
-            for name in archive.namelist():
-                with ZipFile(io.BytesIO(archive.read(name))) as document:
-                    assert document.testzip() is None
+            assert [Path(name).suffix for name in archive.namelist()] == [".xlsx"]
+            with ZipFile(io.BytesIO(archive.read(archive.namelist()[0]))) as document:
+                assert document.testzip() is None
         app.run()
         assert len(app.get("download_button")) == 1
         assert len(kit_moves) == 1
@@ -188,7 +187,7 @@ def test_return_does_not_write_an_os_that_already_has_a_return(sheets):
     assert not sheets.writes
 
 @pytest.mark.parametrize("code", ["123456789", "987654321"])
-def test_invalid_word_template_does_not_write_return_or_debit_kits(sheets, code):
+def test_return_does_not_depend_on_the_word_template(sheets, code):
     app = AppTest.from_file(str(ROOT / "pages/2_Retorno_da_Amostra.py"), default_timeout=20)
     app.session_state["retorno_lista"] = {code: "123456"}
     app.session_state["retorno_localidades"] = {code: "CANUTAMA"}
@@ -198,7 +197,7 @@ def test_invalid_word_template_does_not_write_return_or_debit_kits(sheets, code)
             click(app, "📥 Processar retorno")
             app.text_input(key="retorno_lancador").set_value("CAROL PASSOS")
             click(app, "✅ Confirmar lançamento")
-            assert app.error
-            assert not sheets.writes
-            stock.assert_not_called()
-            assert app.session_state["retorno_lista"] == {code: "123456"}
+            assert not app.error
+            assert sheets.writes
+            assert stock.called
+            assert not app.session_state["retorno_lista"]

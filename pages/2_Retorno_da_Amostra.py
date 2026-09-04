@@ -1194,19 +1194,6 @@ if generate:
                 ).to_excel(writer, index=False, sheet_name="Nao_Encontradas")
         excel_buffer.seek(0)
 
-    with pacman_loader("Gerando o documento Word..."):
-        try:
-            word_buffer = _build_word_document(
-                locality,
-                len(df_ok),
-                today,
-            )
-        except Exception as exc:
-            st.session_state.retorno_ultimo_fingerprint = ""
-            st.session_state.retorno_ultimo_processamento_em = 0.0
-            st.error(f"Não foi possível gerar o documento Word: {exc}")
-            st.stop()
-
     with pacman_loader("Gravando o retorno no Google Sheets..."):
         if missing:
             try:
@@ -1270,10 +1257,6 @@ if generate:
         archive.writestr(
             f"{safe_identification}.xlsx",
             excel_buffer.getvalue(),
-        )
-        archive.writestr(
-            f"{safe_identification}.docx",
-            word_buffer.getvalue(),
         )
     all_files_buffer.seek(0)
     st.session_state["retorno_arquivo"] = all_files_buffer.getvalue()
