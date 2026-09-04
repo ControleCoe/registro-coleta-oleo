@@ -15,6 +15,22 @@ import oleo_utils
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_google_sheets_request_has_a_short_network_timeout():
+    transports = []
+
+    def authorized_http(_credentials, http):
+        transports.append(http)
+        return object()
+
+    oleo_utils._get_sheets_service.clear()
+    with patch.object(oleo_utils, "_authorize_google_sheets", return_value=object()):
+        with patch.object(oleo_utils, "AuthorizedHttp", side_effect=authorized_http):
+            with patch.object(oleo_utils, "build", return_value=object()):
+                oleo_utils._get_sheets_service()
+
+    assert transports[0].timeout == 15
+
+
 class Sheets:
     """In-memory Google boundary. No production credentials or records are used."""
 
