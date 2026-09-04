@@ -28,7 +28,7 @@ def test_google_sheets_request_has_a_short_network_timeout():
             with patch.object(oleo_utils, "build", return_value=object()):
                 oleo_utils._get_sheets_service()
 
-    assert transports[0].timeout == 15
+    assert transports[0].timeout == 3
 
 
 class Sheets:

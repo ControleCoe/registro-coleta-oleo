@@ -257,7 +257,7 @@ if st is not None:
         return build(
             "sheets",
             "v4",
-            http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=15)),
+            http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=3)),
             cache_discovery=False,
         )
 else:
@@ -266,7 +266,7 @@ else:
         return build(
             "sheets",
             "v4",
-            http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=15)),
+            http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=3)),
             cache_discovery=False,
         )
 
