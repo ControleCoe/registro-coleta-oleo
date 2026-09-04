@@ -1137,7 +1137,6 @@ if generate:
                 + " já possui retorno registrado. Nenhuma gravação foi feita."
             )
             st.stop()
-
     status_idx = _col_to_idx(STATUS_COL)
     date_idx = _col_to_idx(DATE_COL)
     os_idx = _col_to_idx(OS_COL)

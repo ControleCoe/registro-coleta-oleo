@@ -187,7 +187,6 @@ def test_return_does_not_write_an_os_that_already_has_a_return(sheets):
     assert app.warning
     assert not sheets.writes
 
-
 @pytest.mark.parametrize("code", ["123456789", "987654321"])
 def test_invalid_word_template_does_not_write_return_or_debit_kits(sheets, code):
     app = AppTest.from_file(str(ROOT / "pages/2_Retorno_da_Amostra.py"), default_timeout=20)
